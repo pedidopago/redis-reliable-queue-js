@@ -20,7 +20,7 @@ yarn add @types/redis@2 --save
 
 ## Usage
 ```typescript
-import { ReliableQueue<T>, Listener<T>, Message<T> } from '@pedidopago/redis-reliable-queue';
+import { ReliableQueue, Listener, Message } from '@pedidopago/redis-reliable-queue';
 // import { ClientOpts } from 'redis';
 // ...
 type MyMessagePayload interface {
