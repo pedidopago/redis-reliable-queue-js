@@ -27,7 +27,7 @@ type MyMessagePayload interface {
     order_id : string;
 }
 // create a queue with exis
-const rq = ReliableQueue.newWithRedisOpts<MyMessagePayload>(6379,"redis-host.pedidopago.com.br");
+const rq = ReliableQueue.newWithRedisOpts<MyMessagePayload>("queuename", 6379,"redis-host.pedidopago.com.br");
 // send a message:
 await rq.pushMessage("topic", {order_id: "FFABE9"});
 // listen for messages:
