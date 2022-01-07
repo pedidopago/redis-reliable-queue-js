@@ -37,8 +37,8 @@ const listener = await rq.listen("worker-id");
 // to wait until a message is received:
 const message = await listener.waitForMessage();
 // the message is of type Message<MyMessagePayload> in this case
-console.log(message.topic); // string
-console.log(message.content); // MyMessagePayload
+console.log(message.topic); // string -> "topic"
+console.log(message.content); // MyMessagePayload {order_id: "FFABE9"}
 ```
 
 ## Test
