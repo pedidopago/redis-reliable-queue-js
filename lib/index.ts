@@ -10,16 +10,23 @@ export class ReliableQueue<T> {
         this.rediscl = rediscl;
     };
 
-    static newWithRedisOpts(queuename: string, port_arg: number, host_arg?: string, options?: ClientOpts): ReliableQueue {
+    static newWithRedisOpts<T2>(queuename: string, port_arg: number, host_arg?: string, options?: ClientOpts): ReliableQueue<T2> {
         const rediscl = createNodeRedisClient(port_arg, host_arg, options);
-        const rq = new ReliableQueue(queuename, rediscl);
+        const rq = new ReliableQueue<T2>(queuename, rediscl);
         return rq;
     };
 
-    async listen(workerID: string) {
+    async listen(workerID: string): Promise<Listener<T>> {
         const processingQueue = this.name + "-processing-" + workerID
         await this.queuePastEvents(processingQueue);
+        return new Listener<T>(this.name, processingQueue, this.rediscl);
     };
+
+    async pushMessage(topic: string, content: T): Promise<number> {
+        const n = await this.rediscl.lpush(this.name, JSON.stringify({ topic, content }));
+        return n;
+    };
+
     private async queuePastEvents(processingQueue: string): Promise<void> {
         let lastv = "init";
         while (lastv !== "") {
@@ -47,7 +54,9 @@ export class Listener<T> {
             return null;
         }
         //TODO: continue
-        return msg;
+        const v = JSON.parse(msg) as Message<T>;
+        await this.rediscl.lrem(this.processingQueue, 1, msg);
+        return v;
     }
 }
 
