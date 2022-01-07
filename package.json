@@ -1,0 +1,27 @@
+{
+  "name": "@pedidopago/redis-reliable-queue",
+  "version": "1.0.0",
+  "description": "Reliable queue pattern using Redis as a backend",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pedidopago/redis-reliable-queue-js.git"
+  },
+  "author": "Gabriel Ochsenhofer",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pedidopago/redis-reliable-queue-js/issues"
+  },
+  "homepage": "https://github.com/pedidopago/redis-reliable-queue-js#readme",
+  "devDependencies": {
+    "typescript": "^4.5.4"
+  },
+  "dependencies": {
+    "@types/redis": "^4.0.11",
+    "handy-redis": "^2.3.1",
+    "redis": "^3.1.2"
+  }
+}
