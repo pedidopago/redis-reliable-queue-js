@@ -53,7 +53,7 @@ export class Listener<T> {
         if (msg === null) {
             return null;
         }
-        //TODO: continue
+        //TODO: check if v is valid (?)
         const v = JSON.parse(msg) as Message<T>;
         await this.rediscl.lrem(this.processingQueue, 1, msg);
         return v;
