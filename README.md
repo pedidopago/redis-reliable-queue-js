@@ -35,7 +35,7 @@ const listener = await rq.listen("worker-id");
 // the worker ID is used to retrieve messages if the service crashes while reading messages.
 
 // to wait until a message is received:
-const message = listener.waitForMessage();
+const message = await listener.waitForMessage();
 // the message is of type Message<MyMessagePayload> in this case
 console.log(message.topic); // string
 console.log(message.content); // MyMessagePayload
