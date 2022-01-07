@@ -29,7 +29,7 @@ export class ReliableQueue<T> {
 
     private async queuePastEvents(processingQueue: string): Promise<void> {
         let lastv = "init";
-        while (lastv !== "") {
+        while (lastv) {
             lastv = await this.rediscl.rpoplpush(processingQueue, this.name);
         }
     };

@@ -41,7 +41,17 @@ console.log(message.topic); // string
 console.log(message.content); // MyMessagePayload
 ```
 
-## Test (TODO)
+## Test
+
+Setup the ".env" (optional):
+```sh
+#.env
+REDIS_HOST=192.168.X.Y
+REDIS_PORT=6379
+TEST_QUEUE=sometestqueue
+```
+
+Run:
 ```sh
 npm run test
 ```
