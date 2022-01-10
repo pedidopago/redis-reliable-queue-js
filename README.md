@@ -8,9 +8,10 @@ https://blog.tuleap.org/how-we-replaced-rabbitmq-redis
 
 ## Installation 
 ```sh
+# with npm:
 npm install @pedidopago/redis-reliable-queue --save
 
-# you can also use yarn:
+# with yarn:
 yarn add @pedidopago/redis-reliable-queue
 ```
 
@@ -36,8 +37,8 @@ const [message, finalizemsg] = await listener.waitForMessage();
 console.log(message.topic); // string -> "topic"
 console.log(message.content); // MyMessagePayload {order_id: "FFABE9"}
 await finalizemsg(); // you must run this after you did something with msg successfully
-// failing to run "finalizemsg" will make the msg persist, so the msg
-// will be received again once you instantiate rq.listen("id") after a restart
+// failing to run "finalizemsg" will persist the message, so it will be received
+// again once you instantiate rq.listen("id") after a restart
 ```
 
 ## Test
