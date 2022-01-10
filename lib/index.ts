@@ -48,15 +48,17 @@ export class Listener<T> {
         this.rediscl = rediscl;
     }
 
-    async waitForMessage(timeout: number = 0): Promise<Message<T> | null> {
+    async waitForMessage(timeout: number = 10): Promise<[Message<T> | null, Function]> {
         const msg = await this.rediscl.brpoplpush(this.name, this.processingQueue, timeout);
         if (msg === null) {
-            return null;
+            return [null, async () => { }];
         }
         //TODO: check if v is valid (?)
         const v = JSON.parse(msg) as Message<T>;
-        await this.rediscl.lrem(this.processingQueue, 1, msg);
-        return v;
+        const afn = async () => {
+            await this.rediscl.lrem(this.processingQueue, 1, msg);
+        }
+        return [v, afn];
     }
 }
 

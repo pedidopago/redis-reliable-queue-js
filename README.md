@@ -9,13 +9,9 @@ https://blog.tuleap.org/how-we-replaced-rabbitmq-redis
 ## Installation 
 ```sh
 npm install @pedidopago/redis-reliable-queue --save
-npm install redis@3 --save
-npm install @types/redis@2 --save
 
 # you can also use yarn:
 yarn add @pedidopago/redis-reliable-queue
-yarn add redis@3 --save
-yarn add @types/redis@2 --save
 ```
 
 ## Usage
@@ -35,10 +31,13 @@ const listener = await rq.listen("worker-id");
 // the worker ID is used to retrieve messages if the service crashes while reading messages.
 
 // to wait until a message is received:
-const message = await listener.waitForMessage();
+const [message, finalizemsg] = await listener.waitForMessage();
 // the message is of type Message<MyMessagePayload> in this case
 console.log(message.topic); // string -> "topic"
 console.log(message.content); // MyMessagePayload {order_id: "FFABE9"}
+await finalizemsg(); // you must run this after you did something with msg successfully
+// failing to run "finalizemsg" will make the msg persist, so the msg
+// will be received again once you instantiate rq.listen("id") after a restart
 ```
 
 ## Test

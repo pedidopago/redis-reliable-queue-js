@@ -14,7 +14,8 @@ describe('test reliable queue push pop', () => {
     });
     it('should return topic1:hello', async () => {
         const listener = await rq.listen('testworker');
-        const msg = await listener.waitForMessage(1);
+        const [msg, didprocess] = await listener.waitForMessage(1);
+        await didprocess();
         expect(msg.topic).to.equal('topic1');
         expect(msg.content).to.equal('hello');
     })
