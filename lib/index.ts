@@ -17,6 +17,9 @@ export class ReliableQueue<T> {
     options?: ClientOpts
   ): ReliableQueue<T2> {
     const rediscl = createNodeRedisClient(port_arg, host_arg, options);
+    if(options && options.password) {
+      rediscl.auth(options.password);
+    }
     const rq = new ReliableQueue<T2>(queuename, rediscl);
     return rq;
   }
