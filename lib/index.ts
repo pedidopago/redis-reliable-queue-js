@@ -20,7 +20,7 @@ export class ReliableQueue<T> {
     if(options && options.password) {
       // auth may be fullfilled or rejected
       rediscl.auth(options.password).then((ok) => {
-        console.log("redis auth ok!", ok);
+        //console.log("redis auth ok!", ok);
       }, (e) => {
         console.error("redis auth error!", e);
       });
