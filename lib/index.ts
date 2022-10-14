@@ -18,7 +18,12 @@ export class ReliableQueue<T> {
   ): ReliableQueue<T2> {
     const rediscl = createNodeRedisClient(port_arg, host_arg, options);
     if(options && options.password) {
-      rediscl.auth(options.password);
+      // auth may be fullfilled or rejected
+      rediscl.auth(options.password).then((ok) => {
+        console.log("redis auth ok!", ok);
+      }, (e) => {
+        console.error("redis auth error!", e);
+      });
     }
     const rq = new ReliableQueue<T2>(queuename, rediscl);
     return rq;
