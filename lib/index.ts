@@ -1,22 +1,114 @@
 import { createNodeRedisClient, WrappedNodeRedisClient } from "handy-redis";
 import { ClientOpts } from "redis";
 
+type ConnectionConfig = {
+  port: number;
+  host: string;
+  options?: ClientOpts;
+}
 export class ReliableQueue<T> {
-  private rediscl: WrappedNodeRedisClient;
-  private name: string;
+  private redisCli: WrappedNodeRedisClient;
 
-  constructor(queuename: string, rediscl: WrappedNodeRedisClient) {
-    this.name = queuename;
-    this.rediscl = rediscl;
+  constructor(
+    private readonly name: string,
+    private readonly connectionConfig: ConnectionConfig,
+  ) {
+    const {port, host, options} = connectionConfig;
+
+    const redisCli = createNodeRedisClient(port, host, options);
+    if(options && options.password) {
+      // auth may be fullfilled or rejected
+      redisCli.auth(options.password).then((ok) => {
+        //console.log("redis auth ok!", ok);
+      }, (e) => {
+        console.error("redis auth error!", e);
+      });
+    }
+
+    this.redisCli = redisCli;
   }
 
   static newWithRedisOpts<T2>(
-    queuename: string,
-    port_arg: number,
-    host_arg?: string,
+    queueName: string,
+    port: number,
+    host: string,
     options?: ClientOpts
   ): ReliableQueue<T2> {
-    const rediscl = createNodeRedisClient(port_arg, host_arg, options);
+    const rq = new ReliableQueue<T2>(queueName, {
+      host,
+      port,
+      options
+    });
+
+    return rq;
+  }
+
+  async listen(workerID: string): Promise<Listener<T>> {
+    const processingQueue = this.name + "-processing-" + workerID;
+    await this.queuePastEvents(processingQueue);
+    return new Listener<T>(this.name, processingQueue, this.connectionConfig, this.redisCli);
+  }
+
+  async pushMessage(topic: string, content: T): Promise<number> {
+    const n = await this.redisCli.lpush(
+      this.name,
+      JSON.stringify({ topic, content })
+    );
+    return n;
+  }
+
+  async pushRawMessage(content: T): Promise<number> {
+    const n = await this.redisCli.lpush(this.name, JSON.stringify(content));
+    return n;
+  }
+
+  async close(): Promise<void> {
+    await this.redisCli.quit();
+  }
+
+  private async queuePastEvents(processingQueue: string): Promise<void> {
+    let lastv = "init";
+    while (lastv) {
+      lastv = await this.redisCli.rpoplpush(processingQueue, this.name);
+    }
+  }
+}
+
+export class Listener<T> {
+
+  constructor(
+    private readonly name: string,
+    private readonly processingQueue: string,
+    private readonly connectionConfig: ConnectionConfig,
+    private redisCli: WrappedNodeRedisClient
+  ) {}
+
+  async waitForMessage(
+    timeout: number = 10
+  ): Promise<[Message<T> | null, Function]> {
+    await this.assertRedisConnection();
+    
+    const msg = await this.redisCli.brpoplpush(
+      this.name,
+      this.processingQueue,
+      timeout
+    );
+
+    if (msg === null) {
+      return [null, async () => {}];
+    }
+    //TODO: check if v is valid (?)
+    const v = JSON.parse(msg) as Message<T>;
+    const afn = async () => {
+      await this.redisCli.lrem(this.processingQueue, 1, msg);
+    };
+    return [v, afn];
+  }
+
+  private async newConnection(): Promise<WrappedNodeRedisClient> {
+    const {port, host, options} = this.connectionConfig;
+    const rediscl = createNodeRedisClient(port, host, options);
+    
     if(options && options.password) {
       // auth may be fullfilled or rejected
       rediscl.auth(options.password).then((ok) => {
@@ -25,68 +117,19 @@ export class ReliableQueue<T> {
         console.error("redis auth error!", e);
       });
     }
-    const rq = new ReliableQueue<T2>(queuename, rediscl);
-    return rq;
+    return rediscl;
   }
 
-  async listen(workerID: string): Promise<Listener<T>> {
-    const processingQueue = this.name + "-processing-" + workerID;
-    await this.queuePastEvents(processingQueue);
-    return new Listener<T>(this.name, processingQueue, this.rediscl);
-  }
-
-  async pushMessage(topic: string, content: T): Promise<number> {
-    const n = await this.rediscl.lpush(
-      this.name,
-      JSON.stringify({ topic, content })
-    );
-    return n;
-  }
-
-  async close(): Promise<void> {
-    await this.rediscl.quit();
-  }
-
-  private async queuePastEvents(processingQueue: string): Promise<void> {
-    let lastv = "init";
-    while (lastv) {
-      lastv = await this.rediscl.rpoplpush(processingQueue, this.name);
+  async assertRedisConnection(): Promise<void> {
+    try{
+      await this.redisCli.ping();
+    }catch(e) {
+      try{
+        this.redisCli = await this.newConnection();
+      }catch(e){
+        throw new Error("Could not connect to redis server");
+      }
     }
-  }
-}
-
-export class Listener<T> {
-  private rediscl: WrappedNodeRedisClient;
-  private name: string;
-  private processingQueue: string;
-
-  constructor(
-    queuename: string,
-    processingQueue: string,
-    rediscl: WrappedNodeRedisClient
-  ) {
-    this.name = queuename;
-    this.processingQueue = processingQueue;
-    this.rediscl = rediscl;
-  }
-
-  async waitForMessage(
-    timeout: number = 10
-  ): Promise<[Message<T> | null, Function]> {
-    const msg = await this.rediscl.brpoplpush(
-      this.name,
-      this.processingQueue,
-      timeout
-    );
-    if (msg === null) {
-      return [null, async () => {}];
-    }
-    //TODO: check if v is valid (?)
-    const v = JSON.parse(msg) as Message<T>;
-    const afn = async () => {
-      await this.rediscl.lrem(this.processingQueue, 1, msg);
-    };
-    return [v, afn];
   }
 }
 
