@@ -7,25 +7,31 @@ type ConnectionConfig = {
   options?: ClientOpts;
 }
 export class ReliableQueue<T> {
-  private redisCli: WrappedNodeRedisClient;
+  private redisCli: WrappedNodeRedisClient | undefined;
 
   constructor(
     private readonly name: string,
     private readonly connectionConfig: ConnectionConfig,
-  ) {
-    const {port, host, options} = connectionConfig;
+  ) {}
 
+  async getRedisConnection(): Promise<WrappedNodeRedisClient> {
+    if(this.redisCli) {
+      return this.redisCli;
+    }
+    const {port, host, options} = this.connectionConfig;
+    
     const redisCli = createNodeRedisClient(port, host, options);
+    
     if(options && options.password) {
-      // auth may be fullfilled or rejected
-      redisCli.auth(options.password).then((ok) => {
-        //console.log("redis auth ok!", ok);
-      }, (e) => {
-        console.error("redis auth error!", e);
-      });
+      const auth = await redisCli.auth(options.password)
+
+      if (auth === "OK") {
+        this.redisCli = redisCli;
+        return redisCli;
+      }
     }
 
-    this.redisCli = redisCli;
+    throw new Error("Could not connect to redis server because password is not set");
   }
 
   static newWithRedisOpts<T2>(
@@ -44,13 +50,16 @@ export class ReliableQueue<T> {
   }
 
   async listen(workerID: string): Promise<Listener<T>> {
+    const redisCli = await this.getRedisConnection();
     const processingQueue = this.name + "-processing-" + workerID;
     await this.queuePastEvents(processingQueue);
-    return new Listener<T>(this.name, processingQueue, this.connectionConfig, this.redisCli);
+    return new Listener<T>(this.name, processingQueue, this.connectionConfig);
   }
 
   async pushMessage(topic: string, content: T): Promise<number> {
-    const n = await this.redisCli.lpush(
+    const redisCli = await this.getRedisConnection();
+
+    const n = await redisCli.lpush(
       this.name,
       JSON.stringify({ topic, content })
     );
@@ -58,37 +67,43 @@ export class ReliableQueue<T> {
   }
 
   async pushRawMessage(content: T): Promise<number> {
-    const n = await this.redisCli.lpush(this.name, JSON.stringify(content));
+    const redisCli = await this.getRedisConnection();
+
+    const n = await redisCli.lpush(this.name, JSON.stringify(content));
     return n;
   }
 
   async close(): Promise<void> {
-    await this.redisCli.quit();
+    const redisCli = await this.getRedisConnection();
+    await redisCli.quit();
   }
 
   private async queuePastEvents(processingQueue: string): Promise<void> {
+    const redisCli = await this.getRedisConnection();
+
     let lastv = "init";
     while (lastv) {
-      lastv = await this.redisCli.rpoplpush(processingQueue, this.name);
+      lastv = await redisCli.rpoplpush(processingQueue, this.name);
     }
   }
 }
 
 export class Listener<T> {
+  private redisCli: WrappedNodeRedisClient | undefined;
 
   constructor(
     private readonly name: string,
     private readonly processingQueue: string,
     private readonly connectionConfig: ConnectionConfig,
-    private redisCli: WrappedNodeRedisClient
   ) {}
 
   async waitForMessage(
     timeout: number = 10
   ): Promise<[Message<T> | null, Function]> {
     await this.assertRedisConnection();
+    const redisCli = await this.getRedisConnection();
     
-    const msg = await this.redisCli.brpoplpush(
+    const msg = await redisCli.brpoplpush(
       this.name,
       this.processingQueue,
       timeout
@@ -100,9 +115,18 @@ export class Listener<T> {
     //TODO: check if v is valid (?)
     const v = JSON.parse(msg) as Message<T>;
     const afn = async () => {
-      await this.redisCli.lrem(this.processingQueue, 1, msg);
+      await redisCli.lrem(this.processingQueue, 1, msg);
     };
     return [v, afn];
+  }
+
+  private async getRedisConnection(): Promise<WrappedNodeRedisClient> {
+    if(this.redisCli) {
+      return this.redisCli;
+    }
+    
+    this.redisCli = await this.newConnection();
+    return this.redisCli;
   }
 
   private async newConnection(): Promise<WrappedNodeRedisClient> {
@@ -121,9 +145,11 @@ export class Listener<T> {
     throw new Error("Could not connect to redis server because password is not set");
   }
 
-  async assertRedisConnection(): Promise<void> {
+  private async assertRedisConnection(): Promise<void> {
+    const redisCli = await this.getRedisConnection();
+
     try{
-      await this.redisCli.ping();
+      await redisCli.ping();
     }catch(e) {
       try{
         this.redisCli = await this.newConnection();
