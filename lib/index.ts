@@ -107,17 +107,18 @@ export class Listener<T> {
 
   private async newConnection(): Promise<WrappedNodeRedisClient> {
     const {port, host, options} = this.connectionConfig;
-    const rediscl = createNodeRedisClient(port, host, options);
+    const redisCli = createNodeRedisClient(port, host, options);
     
     if(options && options.password) {
       // auth may be fullfilled or rejected
-      rediscl.auth(options.password).then((ok) => {
-        //console.log("redis auth ok!", ok);
-      }, (e) => {
-        console.error("redis auth error!", e);
-      });
+      const auth = await redisCli.auth(options.password);
+
+      if(auth === "OK") {
+        return redisCli;
+      }
     }
-    return rediscl;
+    
+    throw new Error("Could not connect to redis server because password is not set");
   }
 
   async assertRedisConnection(): Promise<void> {
