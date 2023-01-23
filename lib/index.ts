@@ -21,13 +21,9 @@ class RedisCli {
     if(options && options.password) {
       // auth may be fullfilled or rejected
       const auth = await redisCli.auth(options.password);
-
-      if(auth === "OK") {
-        return redisCli;
-      }
     }
     
-    throw new Error("Could not connect to redis server because password is not set");
+    return redisCli;
   }
 
   private async getRedisConnection(): Promise<WrappedNodeRedisClient> {
