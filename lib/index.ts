@@ -12,13 +12,13 @@ class RedisCli {
 
   constructor(
     private readonly connectionConfig: ConnectionConfig,
-  ) {}
+  ) { }
 
   private async newConnection(): Promise<WrappedNodeRedisClient> {
-    const {port, host, options} = this.connectionConfig;
+    const { port, host, options } = this.connectionConfig;
     const redisCli = createNodeRedisClient(port, host, options);
-    
-    if(options && options.password) {
+
+    if (options && options.password) {
       // auth may be fullfilled or rejected
       await redisCli.auth(options.password);
     }
@@ -27,25 +27,25 @@ class RedisCli {
   }
 
   private async getRedisConnection(): Promise<WrappedNodeRedisClient> {
-    if(this.redisCli) {
+    if (this.redisCli) {
       return this.redisCli;
     }
 
     const redisCli = await this.newConnection();
     this.redisCli = redisCli;
-    
+
     return redisCli;
   }
 
   private async assertRedisConnection(): Promise<void> {
     const redisCli = await this.getRedisConnection();
 
-    try{
+    try {
       await redisCli.ping();
-    }catch(e) {
-      try{
+    } catch (e) {
+      try {
         this.redisCli = await this.newConnection();
-      }catch(e){
+      } catch (e) {
         throw new Error("Could not connect to redis server");
       }
     }
@@ -90,7 +90,7 @@ export class ReliableQueue<T> {
   async listen(workerID: string): Promise<Listener<T>> {
     const processingQueue = this.name + "-processing-" + workerID;
     await this.queuePastEvents(processingQueue);
-    return new Listener<T>(this.name, processingQueue, this.connectionConfig);
+    return new Listener<T>(this.name, processingQueue, this.redisCli);
   }
 
   async pushMessage(topic: string, content: T): Promise<number> {
@@ -125,21 +125,17 @@ export class ReliableQueue<T> {
 }
 
 export class Listener<T> {
-  private redisCli: RedisCli
-
   constructor(
     private readonly name: string,
     private readonly processingQueue: string,
-    connectionConfig: ConnectionConfig,
-  ) {
-    this.redisCli = new RedisCli(connectionConfig);
-  }
+    private readonly redisCli: RedisCli,
+  ) { }
 
   async waitForMessage(
     timeout: number = 10
   ): Promise<[Message<T> | null, Function]> {
     const redisCli = await this.redisCli.getCli();
-    
+
     const msg = await redisCli.brpoplpush(
       this.name,
       this.processingQueue,
@@ -147,7 +143,7 @@ export class Listener<T> {
     );
 
     if (msg === null) {
-      return [null, async () => {}];
+      return [null, async () => { }];
     }
     //TODO: check if v is valid (?)
     const v = JSON.parse(msg) as Message<T>;
