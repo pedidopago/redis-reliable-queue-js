@@ -1,160 +1,102 @@
-import { createNodeRedisClient, WrappedNodeRedisClient } from "handy-redis";
-import { ClientOpts } from "redis";
+import { createClient, RedisClientType } from "redis";
+import { luaScript } from "./lua-script";
+import {
+  CreateReliableQueueDTO,
+  ListenParamsDTO,
+  PopMessageResponseDTO,
+  PushMessageParamsDTO,
+} from "./types";
+import { setTimeout } from "timers/promises";
 
-type ConnectionConfig = {
-  port: number;
-  host: string;
-  options?: ClientOpts;
-}
+export class ReliableQueue {
+  #redisCli: RedisClientType<any, any, any>;
+  #ackSuffix: string;
+  #listExpirationSeconds: number;
+  #messageTimeoutSeconds: number;
+  #emptyQueueTimeoutSeconds: number;
 
-class RedisCli {
-  private redisCli: WrappedNodeRedisClient | undefined;
-
-  constructor(
-    private readonly connectionConfig: ConnectionConfig,
-  ) { }
-
-  private async newConnection(): Promise<WrappedNodeRedisClient> {
-    const { port, host, options } = this.connectionConfig;
-    const redisCli = createNodeRedisClient(port, host, options);
-
-    if (options && options.password) {
-      // auth may be fullfilled or rejected
-      await redisCli.auth(options.password);
+  private async redisCli() {
+    if (this.#redisCli.isOpen) {
+      return this.#redisCli;
     }
 
-    return redisCli;
-  }
+    await this.#redisCli.connect();
 
-  private async getRedisConnection(): Promise<WrappedNodeRedisClient> {
-    if (this.redisCli) {
-      return this.redisCli;
+    if (!this.#redisCli.isOpen) {
+      throw new Error("Could not connect to Redis");
     }
 
-    const redisCli = await this.newConnection();
-    this.redisCli = redisCli;
-
-    return redisCli;
+    return this.#redisCli;
   }
 
-  private async assertRedisConnection(): Promise<void> {
-    const redisCli = await this.getRedisConnection();
+  constructor(private readonly config: CreateReliableQueueDTO) {
+    this.#redisCli = createClient({
+      url: config.url,
+    });
+    this.#ackSuffix = config.ackSuffix || "-ack";
+    this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
+    this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
+    this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
+  }
 
-    try {
-      await redisCli.ping();
-    } catch (e) {
-      try {
-        this.redisCli = await this.newConnection();
-      } catch (e) {
-        throw new Error("Could not connect to redis server");
-      }
+  async pushMessage(params: PushMessageParamsDTO) {
+    const { queueName, message } = params;
+    const cli = await this.redisCli();
+
+    if (this.config.lifo) {
+      await cli.lPush(queueName, message);
+    } else {
+      await cli.rPush(queueName, message);
     }
   }
 
-  async getCli(): Promise<WrappedNodeRedisClient> {
-    await this.assertRedisConnection();
-    return await this.getRedisConnection();
-  }
+  async popMessage(
+    queueName: string
+  ): Promise<PopMessageResponseDTO | undefined> {
+    const cli = await this.redisCli();
+    const ackList = queueName + this.#ackSuffix;
+    const popCommand = this.config.lifo ? "rpop" : "lpop";
+    const expireTime =
+      new Date().getTime() / 1000 + this.#messageTimeoutSeconds;
 
-  async close(): Promise<void> {
-    const redisCli = await this.getRedisConnection();
-    await redisCli.quit();
-  }
-}
-
-export class ReliableQueue<T> {
-  private redisCli: RedisCli
-
-  constructor(
-    private readonly name: string,
-    private readonly connectionConfig: ConnectionConfig,
-  ) {
-    this.redisCli = new RedisCli(connectionConfig);
-  }
-
-  static newWithRedisOpts<T2>(
-    queueName: string,
-    port: number,
-    host: string,
-    options?: ClientOpts
-  ): ReliableQueue<T2> {
-    const rq = new ReliableQueue<T2>(queueName, {
-      host,
-      port,
-      options
+    const result = await cli.eval(luaScript, {
+      keys: [
+        queueName,
+        ackList,
+        expireTime.toString(),
+        this.#listExpirationSeconds.toString(),
+        popCommand,
+        "rpush",
+      ],
     });
 
-    return rq;
-  }
-
-  async listen(workerID: string): Promise<Listener<T>> {
-    const processingQueue = this.name + "-processing-" + workerID;
-    await this.queuePastEvents(processingQueue);
-    return new Listener<T>(this.name, processingQueue, this.redisCli);
-  }
-
-  async pushMessage(topic: string, content: T): Promise<number> {
-    const redisCli = await this.redisCli.getCli()
-
-    const n = await redisCli.lpush(
-      this.name,
-      JSON.stringify({ topic, content })
-    );
-    return n;
-  }
-
-  async pushRawMessage(content: T): Promise<number> {
-    const redisCli = await this.redisCli.getCli()
-
-    const n = await redisCli.lpush(this.name, JSON.stringify(content));
-    return n;
-  }
-
-  async close(): Promise<void> {
-    const redisCli = await this.redisCli.getCli();
-    await redisCli.quit();
-  }
-
-  private async queuePastEvents(processingQueue: string): Promise<void> {
-    const redisCli = await this.redisCli.getCli();
-    let lastv = "init";
-    while (lastv) {
-      lastv = await redisCli.rpoplpush(processingQueue, this.name);
+    if (result) {
+      return [
+        String(result),
+        async () => {
+          const arkMessage = expireTime + "|" + String(result);
+          await cli.lRem(ackList, 1, arkMessage);
+        },
+      ];
     }
   }
-}
 
-export class Listener<T> {
-  constructor(
-    private readonly name: string,
-    private readonly processingQueue: string,
-    private readonly redisCli: RedisCli,
-  ) { }
+  async listen(params: ListenParamsDTO): Promise<void> {
+    while (true) {
+      const value = await this.popMessage(params.queueName);
+      if (value) {
+        const [message, ackFunction] = value;
+        const ack = await params.callback(message);
+        if (ack) await ackFunction();
+        continue;
+      }
 
-  async waitForMessage(
-    timeout: number = 10
-  ): Promise<[Message<T> | null, Function]> {
-    const redisCli = await this.redisCli.getCli();
-
-    const msg = await redisCli.brpoplpush(
-      this.name,
-      this.processingQueue,
-      timeout
-    );
-
-    if (msg === null) {
-      return [null, async () => { }];
+      await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
     }
-    //TODO: check if v is valid (?)
-    const v = JSON.parse(msg) as Message<T>;
-    const afn = async () => {
-      await redisCli.lrem(this.processingQueue, 1, msg);
-    };
-    return [v, afn];
   }
-}
 
-export interface Message<T> {
-  topic: string;
-  content: T;
+  async close() {
+    const cli = await this.redisCli();
+    await cli.disconnect();
+  }
 }
