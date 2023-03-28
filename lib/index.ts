@@ -40,6 +40,7 @@ export class ReliableQueue {
   private createRedisClient(): RedisClientType<any, any, any> {
     return createClient({
       url: this.config.url,
+      password: this.config.password,
     });
   }
 
@@ -109,19 +110,21 @@ export class ReliableQueue {
         }
 
         const [message, ack] = value;
-        const validated = await params.validate(message);
-
-        if (!validated) {
-          await params.errorHandler(
-            new Error("Message validation failed"),
-            message
-          );
-          await ack();
-          continue;
-        }
 
         try {
           const transformedMessage = await params.transform(message);
+
+          const validated = await params.validate(transformedMessage);
+
+          if (!validated) {
+            await params.errorHandler(
+              new Error("Message validation failed"),
+              message
+            );
+            await ack();
+            continue;
+          }
+
           const mutexKey = this.getListenMutex(
             transformedMessage,
             params.mutexPath

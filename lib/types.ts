@@ -1,5 +1,6 @@
 export type CreateReliableQueueDTO = {
   url: string;
+  password?: string;
   lifo?: boolean;
   ackSuffix?: string;
   listExpirationSeconds?: number;
@@ -24,8 +25,8 @@ export type ListenParamsDTO<MessageType> = {
   queueName: string;
   workers: number;
   job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
-  validate: (message: string) => Promise<boolean>;
   transform: (message: string) => Promise<MessageType>;
+  validate: (message: MessageType) => Promise<boolean>;
   errorHandler: (error: Error, message: string) => Promise<void>;
   queueEmptyHandler: () => Promise<void>;
 };
