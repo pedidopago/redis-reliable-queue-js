@@ -1,12 +1,12 @@
 import { createClient, RedisClientType } from "redis";
 import { luaScript } from "./lua-script";
+import { setTimeout } from "timers/promises";
 import {
   CreateReliableQueueDTO,
   ListenParamsDTO,
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
-import { setTimeout } from "timers/promises";
 
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
@@ -14,6 +14,7 @@ export class ReliableQueue {
   #listExpirationSeconds: number;
   #messageTimeoutSeconds: number;
   #emptyQueueTimeoutSeconds: number;
+  #listeners: string[] = [];
 
   private async redisCli() {
     if (this.#redisCli.isOpen) {
@@ -81,18 +82,25 @@ export class ReliableQueue {
     }
   }
 
-  async listen(params: ListenParamsDTO): Promise<void> {
-    while (true) {
-      const value = await this.popMessage(params.queueName);
-      if (value) {
-        const [message, ackFunction] = value;
-        const ack = await params.callback(message);
-        if (ack) await ackFunction();
-        continue;
-      }
-
-      await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
+  listen(params: ListenParamsDTO): void {
+    if (this.#listeners.includes(params.queueName)) {
+      throw new Error(`Already listening ${params.queueName}`);
     }
+    this.#listeners.push(params.queueName);
+
+    new Promise(async () => {
+      while (true) {
+        const value = await this.popMessage(params.queueName);
+        if (value) {
+          const [message, ackFunction] = value;
+          const ack = await params.callback(message);
+          if (ack) await ackFunction();
+          continue;
+        }
+
+        await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
+      }
+    });
   }
 
   async close() {
