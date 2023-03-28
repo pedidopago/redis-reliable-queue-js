@@ -1,6 +1,7 @@
 import { createClient, RedisClientType } from "redis";
 import { luaScript } from "./lua-script";
 import { setTimeout } from "timers/promises";
+import { ReliableQueueCluster } from "./worker";
 import {
   CreateReliableQueueDTO,
   ListenParamsDTO,
@@ -15,25 +16,35 @@ export class ReliableQueue {
   #messageTimeoutSeconds: number;
   #emptyQueueTimeoutSeconds: number;
   #listeners: string[] = [];
+  #workers: ReliableQueueCluster[] = [];
 
-  private async redisCli() {
-    if (this.#redisCli.isOpen) {
+  private async redisCli(): Promise<RedisClientType<any, any, any>> {
+    try {
+      if (this.#redisCli.isOpen) {
+        return this.#redisCli;
+      }
+
+      await this.#redisCli.connect();
+
+      if (!this.#redisCli.isOpen) {
+        throw new Error("Could not connect to Redis");
+      }
+
       return this.#redisCli;
+    } catch (e) {
+      this.#redisCli = this.createRedisClient();
+      return this.redisCli();
     }
+  }
 
-    await this.#redisCli.connect();
-
-    if (!this.#redisCli.isOpen) {
-      throw new Error("Could not connect to Redis");
-    }
-
-    return this.#redisCli;
+  private createRedisClient(): RedisClientType<any, any, any> {
+    return createClient({
+      url: this.config.url,
+    });
   }
 
   constructor(private readonly config: CreateReliableQueueDTO) {
-    this.#redisCli = createClient({
-      url: config.url,
-    });
+    this.#redisCli = this.createRedisClient();
     this.#ackSuffix = config.ackSuffix || "-ack";
     this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
     this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
@@ -82,25 +93,107 @@ export class ReliableQueue {
     }
   }
 
-  listen(params: ListenParamsDTO): void {
+  listen<MessageType>(params: ListenParamsDTO<MessageType>): void {
     if (this.#listeners.includes(params.queueName)) {
       throw new Error(`Already listening ${params.queueName}`);
     }
-    this.#listeners.push(params.queueName);
 
     new Promise(async () => {
       while (true) {
         const value = await this.popMessage(params.queueName);
-        if (value) {
-          const [message, ackFunction] = value;
-          const ack = await params.callback(message);
-          if (ack) await ackFunction();
+
+        if (!value) {
+          await params.queueEmptyHandler();
+          await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
           continue;
         }
 
-        await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
+        const [message, ack] = value;
+        const validated = await params.validate(message);
+
+        if (!validated) {
+          await params.errorHandler(
+            new Error("Message validation failed"),
+            message
+          );
+          await ack();
+          continue;
+        }
+
+        try {
+          const transformedMessage = await params.transform(message);
+          const mutexKey = this.getListenMutex(
+            transformedMessage,
+            params.mutexPath
+          );
+
+          const job = async () => {
+            return params.job({
+              message: transformedMessage,
+              ack,
+            });
+          };
+
+          let worker;
+
+          const workerExists = this.#workers.find(
+            (worker) => worker.clusterId === params.queueName
+          );
+
+          if (workerExists) {
+            worker = workerExists;
+          } else {
+            worker = new ReliableQueueCluster({
+              maxWorkers: params.workers,
+              clusterId: params.queueName,
+            });
+            this.#workers.push(worker);
+          }
+
+          await worker.addJob({
+            job,
+            mutexKey,
+          });
+        } catch (e) {
+          const error = e as Error;
+          await params.errorHandler(error, message);
+          await ack();
+        }
       }
     });
+  }
+
+  private getListenMutex<MessageType>(
+    message: MessageType,
+    mutexPath?: string
+  ): string | undefined {
+    if (mutexPath) {
+      if (typeof message !== "object" || Array.isArray(message) || !message) {
+        throw new Error("Mutex path is only available for object messages");
+      }
+
+      const path = mutexPath.split(".");
+
+      let mutex = message;
+
+      for (const key of path) {
+        //@ts-ignore
+        if (mutex[key]) {
+          //@ts-ignore
+          mutex = mutex[key];
+        } else {
+          return undefined;
+        }
+      }
+
+      if (typeof mutex !== "string") {
+        throw new Error("Mutex path must be a string");
+      }
+
+      return mutex;
+    }
+
+    return undefined;
   }
 
   async close() {

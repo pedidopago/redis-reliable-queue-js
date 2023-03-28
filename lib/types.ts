@@ -14,7 +14,18 @@ export type PushMessageParamsDTO = {
 
 export type PopMessageResponseDTO = [string, Function];
 
-export type ListenParamsDTO = {
+type ListenJobParamsDTO<MessageType> = {
+  message: MessageType;
+  ack: Function;
+};
+
+export type ListenParamsDTO<MessageType> = {
+  mutexPath?: string;
   queueName: string;
-  callback: (message: string) => Promise<boolean>;
+  workers: number;
+  job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
+  validate: (message: string) => Promise<boolean>;
+  transform: (message: string) => Promise<MessageType>;
+  errorHandler: (error: Error, message: string) => Promise<void>;
+  queueEmptyHandler: () => Promise<void>;
 };
