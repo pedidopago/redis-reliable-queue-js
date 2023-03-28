@@ -14,13 +14,25 @@ class ReliableQueueWorker {
     this.#mutexKey = params.mutexKey;
   }
 
-  async run() {
-    this.#isRunning = true;
-    for (const job of this.#jobs) {
-      await job();
-    }
-    this.#isRunning = false;
-    this.#mutexKey = undefined;
+  getJob(): Function | undefined {
+    const job = this.#jobs.shift();
+    if (job) return job;
+    return undefined;
+  }
+
+  run() {
+    new Promise(async (resolve) => {
+      this.#isRunning = true;
+      while (true) {
+        const job = this.getJob();
+        if (!job) break;
+        await job();
+      }
+
+      this.#isRunning = false;
+      this.#mutexKey = undefined;
+      resolve(void 0);
+    });
   }
 
   get isRunning() {
