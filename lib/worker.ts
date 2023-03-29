@@ -14,7 +14,7 @@ class ReliableQueueWorker {
     this.#mutexKey = params.mutexKey;
   }
 
-  getJob(): Function | undefined {
+  private getJob(): Function | undefined {
     const job = this.#jobs.shift();
     if (job) return job;
     return undefined;
