@@ -1,160 +1,206 @@
-import { createNodeRedisClient, WrappedNodeRedisClient } from "handy-redis";
-import { ClientOpts } from "redis";
+import { createClient, RedisClientType } from "redis";
+import { luaScript } from "./lua-script";
+import { setTimeout } from "timers/promises";
+import { ReliableQueueCluster } from "./worker";
+import {
+  CreateReliableQueueDTO,
+  ListenParamsDTO,
+  PopMessageResponseDTO,
+  PushMessageParamsDTO,
+} from "./types";
 
-type ConnectionConfig = {
-  port: number;
-  host: string;
-  options?: ClientOpts;
-}
+export class ReliableQueue {
+  #redisCli: RedisClientType<any, any, any>;
+  #ackSuffix: string;
+  #listExpirationSeconds: number;
+  #messageTimeoutSeconds: number;
+  #emptyQueueTimeoutSeconds: number;
+  #listeners: string[] = [];
+  #workers: ReliableQueueCluster[] = [];
 
-class RedisCli {
-  private redisCli: WrappedNodeRedisClient | undefined;
-
-  constructor(
-    private readonly connectionConfig: ConnectionConfig,
-  ) { }
-
-  private async newConnection(): Promise<WrappedNodeRedisClient> {
-    const { port, host, options } = this.connectionConfig;
-    const redisCli = createNodeRedisClient(port, host, options);
-
-    if (options && options.password) {
-      // auth may be fullfilled or rejected
-      await redisCli.auth(options.password);
-    }
-
-    return redisCli;
-  }
-
-  private async getRedisConnection(): Promise<WrappedNodeRedisClient> {
-    if (this.redisCli) {
-      return this.redisCli;
-    }
-
-    const redisCli = await this.newConnection();
-    this.redisCli = redisCli;
-
-    return redisCli;
-  }
-
-  private async assertRedisConnection(): Promise<void> {
-    const redisCli = await this.getRedisConnection();
-
+  private async redisCli(): Promise<RedisClientType<any, any, any>> {
     try {
-      await redisCli.ping();
-    } catch (e) {
-      try {
-        this.redisCli = await this.newConnection();
-      } catch (e) {
-        throw new Error("Could not connect to redis server");
+      if (this.#redisCli.isOpen) {
+        return this.#redisCli;
       }
+
+      await this.#redisCli.connect();
+
+      if (!this.#redisCli.isOpen) {
+        throw new Error("Could not connect to Redis");
+      }
+
+      return this.#redisCli;
+    } catch (e) {
+      this.#redisCli = this.createRedisClient();
+      return this.redisCli();
     }
   }
 
-  async getCli(): Promise<WrappedNodeRedisClient> {
-    await this.assertRedisConnection();
-    return await this.getRedisConnection();
+  private createRedisClient(): RedisClientType<any, any, any> {
+    return createClient({
+      url: this.config.url,
+      password: this.config.password,
+    });
   }
 
-  async close(): Promise<void> {
-    const redisCli = await this.getRedisConnection();
-    await redisCli.quit();
-  }
-}
-
-export class ReliableQueue<T> {
-  private redisCli: RedisCli
-
-  constructor(
-    private readonly name: string,
-    private readonly connectionConfig: ConnectionConfig,
-  ) {
-    this.redisCli = new RedisCli(connectionConfig);
+  constructor(private readonly config: CreateReliableQueueDTO) {
+    this.#redisCli = this.createRedisClient();
+    this.#ackSuffix = config.ackSuffix || "-ack";
+    this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
+    this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
+    this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
   }
 
-  static newWithRedisOpts<T2>(
-    queueName: string,
-    port: number,
-    host: string,
-    options?: ClientOpts
-  ): ReliableQueue<T2> {
-    const rq = new ReliableQueue<T2>(queueName, {
-      host,
-      port,
-      options
+  async pushMessage(params: PushMessageParamsDTO) {
+    const { queueName, message } = params;
+    const cli = await this.redisCli();
+
+    if (this.config.lifo) {
+      await cli.lPush(queueName, message);
+    } else {
+      await cli.rPush(queueName, message);
+    }
+  }
+
+  async popMessage(
+    queueName: string
+  ): Promise<PopMessageResponseDTO | undefined> {
+    const cli = await this.redisCli();
+    const ackList = queueName + this.#ackSuffix;
+    const popCommand = this.config.lifo ? "rpop" : "lpop";
+    const expireTime =
+      new Date().getTime() / 1000 + this.#messageTimeoutSeconds;
+
+    const result = await cli.eval(luaScript, {
+      keys: [
+        queueName,
+        ackList,
+        expireTime.toString(),
+        this.#listExpirationSeconds.toString(),
+        popCommand,
+        "rpush",
+      ],
     });
 
-    return rq;
-  }
-
-  async listen(workerID: string): Promise<Listener<T>> {
-    const processingQueue = this.name + "-processing-" + workerID;
-    await this.queuePastEvents(processingQueue);
-    return new Listener<T>(this.name, processingQueue, this.redisCli);
-  }
-
-  async pushMessage(topic: string, content: T): Promise<number> {
-    const redisCli = await this.redisCli.getCli()
-
-    const n = await redisCli.lpush(
-      this.name,
-      JSON.stringify({ topic, content })
-    );
-    return n;
-  }
-
-  async pushRawMessage(content: T): Promise<number> {
-    const redisCli = await this.redisCli.getCli()
-
-    const n = await redisCli.lpush(this.name, JSON.stringify(content));
-    return n;
-  }
-
-  async close(): Promise<void> {
-    const redisCli = await this.redisCli.getCli();
-    await redisCli.quit();
-  }
-
-  private async queuePastEvents(processingQueue: string): Promise<void> {
-    const redisCli = await this.redisCli.getCli();
-    let lastv = "init";
-    while (lastv) {
-      lastv = await redisCli.rpoplpush(processingQueue, this.name);
+    if (result) {
+      return [
+        String(result),
+        async () => {
+          const arkMessage = expireTime + "|" + String(result);
+          await cli.lRem(ackList, 1, arkMessage);
+        },
+      ];
     }
   }
-}
 
-export class Listener<T> {
-  constructor(
-    private readonly name: string,
-    private readonly processingQueue: string,
-    private readonly redisCli: RedisCli,
-  ) { }
-
-  async waitForMessage(
-    timeout: number = 10
-  ): Promise<[Message<T> | null, Function]> {
-    const redisCli = await this.redisCli.getCli();
-
-    const msg = await redisCli.brpoplpush(
-      this.name,
-      this.processingQueue,
-      timeout
-    );
-
-    if (msg === null) {
-      return [null, async () => { }];
+  listen<MessageType>(params: ListenParamsDTO<MessageType>): void {
+    if (this.#listeners.includes(params.queueName)) {
+      throw new Error(`Already listening ${params.queueName}`);
     }
-    //TODO: check if v is valid (?)
-    const v = JSON.parse(msg) as Message<T>;
-    const afn = async () => {
-      await redisCli.lrem(this.processingQueue, 1, msg);
-    };
-    return [v, afn];
-  }
-}
 
-export interface Message<T> {
-  topic: string;
-  content: T;
+    new Promise(async () => {
+      while (true) {
+        const value = await this.popMessage(params.queueName);
+
+        if (!value) {
+          await params.queueEmptyHandler();
+          await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
+          continue;
+        }
+
+        const [message, ack] = value;
+
+        try {
+          const transformedMessage = await params.transform(message);
+
+          const validated = await params.validate(transformedMessage);
+
+          if (!validated) {
+            await params.errorHandler(
+              new Error("Message validation failed"),
+              message
+            );
+            await ack();
+            continue;
+          }
+
+          const mutexKey = this.getListenMutex(
+            transformedMessage,
+            params.mutexPath
+          );
+
+          const job = async () => {
+            return params.job({
+              message: transformedMessage,
+              ack,
+            });
+          };
+
+          let worker;
+
+          const workerExists = this.#workers.find(
+            (worker) => worker.clusterId === params.queueName
+          );
+
+          if (workerExists) {
+            worker = workerExists;
+          } else {
+            worker = new ReliableQueueCluster({
+              maxWorkers: params.workers,
+              clusterId: params.queueName,
+            });
+            this.#workers.push(worker);
+          }
+
+          await worker.addJob({
+            job,
+            mutexKey,
+          });
+        } catch (e) {
+          const error = e as Error;
+          await params.errorHandler(error, message);
+          await ack();
+        }
+      }
+    });
+  }
+
+  private getListenMutex<MessageType>(
+    message: MessageType,
+    mutexPath?: string
+  ): string | undefined {
+    if (mutexPath) {
+      if (typeof message !== "object" || Array.isArray(message) || !message) {
+        throw new Error("Mutex path is only available for object messages");
+      }
+
+      const path = mutexPath.split(".");
+
+      let mutex = message;
+
+      for (const key of path) {
+        //@ts-ignore
+        if (mutex[key]) {
+          //@ts-ignore
+          mutex = mutex[key];
+        } else {
+          return undefined;
+        }
+      }
+
+      if (typeof mutex !== "string") {
+        throw new Error("Mutex path must be a string");
+      }
+
+      return mutex;
+    }
+
+    return undefined;
+  }
+
+  async close() {
+    const cli = await this.redisCli();
+    await cli.disconnect();
+  }
 }
