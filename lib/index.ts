@@ -133,10 +133,10 @@ export class ReliableQueue {
           );
 
           const job = async () => {
-            return params.job({
+            await params.job({
               message: transformedMessage,
-              ack,
             });
+            await ack();
           };
 
           let worker;

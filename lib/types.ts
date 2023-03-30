@@ -17,7 +17,6 @@ export type PopMessageResponseDTO = [string, Function];
 
 type ListenJobParamsDTO<MessageType> = {
   message: MessageType;
-  ack: Function;
 };
 
 export type ListenParamsDTO<MessageType> = {
