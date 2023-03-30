@@ -24,9 +24,9 @@ export type ListenParamsDTO<MessageType> = {
   mutexPath?: string;
   queueName: string;
   workers: number;
+  validate?: (message: MessageType) => Promise<boolean>;
   job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
   transform: (message: string) => Promise<MessageType>;
-  validate: (message: MessageType) => Promise<boolean>;
   errorHandler: (error: Error, message: string) => Promise<void>;
   queueEmptyHandler: () => Promise<void>;
 };

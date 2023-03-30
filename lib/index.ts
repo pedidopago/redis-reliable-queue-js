@@ -114,7 +114,9 @@ export class ReliableQueue {
         try {
           const transformedMessage = await params.transform(message);
 
-          const validated = await params.validate(transformedMessage);
+          const validated = params.validate
+            ? await params.validate(transformedMessage)
+            : true;
 
           if (!validated) {
             await params.errorHandler(
