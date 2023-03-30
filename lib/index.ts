@@ -104,7 +104,7 @@ export class ReliableQueue {
         const value = await this.popMessage(params.queueName);
 
         if (!value) {
-          await params.queueEmptyHandler();
+          if (params.queueEmptyHandler) await params.queueEmptyHandler();
           await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
           continue;
         }
