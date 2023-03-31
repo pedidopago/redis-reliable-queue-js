@@ -19,8 +19,8 @@ describe("ReliableQueue", () => {
   });
 
   it("should push message", async () => {
-    const addMutex = async (mutexKey: string) => {
-      const promises = Array.from({ length: 10 }).map(async (_, index) => {
+    const addMutex = async (mutexKey: string, length = 10) => {
+      const promises = Array.from({ length }).map(async (_, index) => {
         await rq.pushMessage({
           queueName: "test",
           message: JSON.stringify({
@@ -35,6 +35,7 @@ describe("ReliableQueue", () => {
 
     await addMutex("a");
     await addMutex("b");
+    await addMutex("c", 2);
 
     await new Promise(async (resolve, reject) => {
       let failTimeout: NodeJS.Timeout;
@@ -65,7 +66,6 @@ describe("ReliableQueue", () => {
           return Promise.resolve();
         },
         transform: async (message) => JSON.parse(message),
-        validate: async () => true,
         job: async (params) => {
           resetTimeouts();
 
@@ -73,17 +73,15 @@ describe("ReliableQueue", () => {
             await setTimeoutAsync(5000);
             console.log("Sou a");
             console.log({ message: params.message }, new Date().toISOString());
-            await params.ack();
             return;
+          }
+
+          if (params.message.mutexTest === "c") {
+            throw new Error("Error, I'm c");
           }
 
           await setTimeoutAsync(1000);
           console.log({ message: params.message }, new Date().toISOString());
-          await params.ack();
-        },
-        queueEmptyHandler() {
-          console.log("Queue empty");
-          return Promise.resolve();
         },
         mutexPath: "mutexTest",
       });

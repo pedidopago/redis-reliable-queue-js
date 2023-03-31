@@ -100,18 +100,22 @@ export class ReliableQueue {
     }
 
     new Promise(async () => {
+      let message: string | undefined;
+      let ack: Function | undefined;
+
       while (true) {
-        const value = await this.popMessage(params.queueName);
-
-        if (!value) {
-          if (params.queueEmptyHandler) await params.queueEmptyHandler();
-          await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
-          continue;
-        }
-
-        const [message, ack] = value;
-
         try {
+          const value = await this.popMessage(params.queueName);
+
+          if (!value) {
+            if (params.queueEmptyHandler) await params.queueEmptyHandler();
+            await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
+            continue;
+          }
+
+          message = value[0];
+          ack = value[1];
+
           const transformedMessage = await params.transform(message);
 
           const validated = params.validate
@@ -133,10 +137,19 @@ export class ReliableQueue {
           );
 
           const job = async () => {
-            await params.job({
-              message: transformedMessage,
-            });
-            await ack();
+            try {
+              await params.job({
+                message: transformedMessage,
+              });
+              // @ts-ignore
+              await ack();
+            } catch (e) {
+              const error = e as Error;
+              // @ts-ignore
+              await params.errorHandler(error, message);
+              // @ts-ignore
+              await ack();
+            }
           };
 
           let worker;
@@ -161,8 +174,10 @@ export class ReliableQueue {
           });
         } catch (e) {
           const error = e as Error;
-          await params.errorHandler(error, message);
-          await ack();
+          if (message && ack) {
+            await params.errorHandler(error, message);
+            await ack();
+          }
         }
       }
     });
