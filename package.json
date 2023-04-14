@@ -1,11 +1,11 @@
 {
   "name": "@pedidopago/redis-reliable-queue",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Reliable queue pattern using Redis as a backend",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json",
     "test": "jest --coverage --runInBand --detectOpenHandles"
   },
   "repository": {
@@ -20,6 +20,9 @@
   "homepage": "https://github.com/pedidopago/redis-reliable-queue-js#readme",
   "dependencies": {
     "redis": "^4.6.4"
+  },
+  "publishConfig": {
+    "@pedidopago:registry": "https://npm.pkg.github.com/"
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0",
