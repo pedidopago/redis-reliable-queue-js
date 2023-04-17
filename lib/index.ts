@@ -5,6 +5,7 @@ import { ReliableQueueCluster } from "./worker";
 import {
   CreateReliableQueueDTO,
   ListenParamsDTO,
+  MetricsDTO,
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
@@ -52,18 +53,7 @@ export class ReliableQueue {
     this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
   }
 
-  async pushMessage(params: PushMessageParamsDTO) {
-    const { queueName, message } = params;
-    const cli = await this.redisCli();
-
-    if (this.config.lifo) {
-      await cli.lPush(queueName, message);
-    } else {
-      await cli.rPush(queueName, message);
-    }
-  }
-
-  async popMessage(
+  private async popMessage(
     queueName: string
   ): Promise<PopMessageResponseDTO | undefined> {
     const cli = await this.redisCli();
@@ -91,6 +81,42 @@ export class ReliableQueue {
           await cli.lRem(ackList, 1, arkMessage);
         },
       ];
+    }
+  }
+
+  async metrics(): Promise<MetricsDTO> {
+    const cli = await this.redisCli();
+    const queues = this.#listeners;
+
+    const metrics: MetricsDTO = {
+      queues: [],
+    };
+
+    for (const queue of queues) {
+      const size = await cli.lLen(queue);
+      const ackList = queue + this.#ackSuffix;
+      const waitingAck = await cli.lLen(ackList);
+
+      metrics.queues.push({
+        name: queue,
+        size,
+        workers: this.#workers.filter((worker) => worker.clusterId === queue)
+          .length,
+        waitingAck,
+      });
+    }
+
+    return metrics;
+  }
+
+  async pushMessage(params: PushMessageParamsDTO) {
+    const { queueName, message } = params;
+    const cli = await this.redisCli();
+
+    if (this.config.lifo) {
+      await cli.lPush(queueName, message);
+    } else {
+      await cli.rPush(queueName, message);
     }
   }
 

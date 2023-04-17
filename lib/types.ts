@@ -29,3 +29,14 @@ export type ListenParamsDTO<MessageType> = {
   validate?: (message: MessageType) => Promise<boolean>;
   queueEmptyHandler?: () => Promise<void>;
 };
+
+export type MetricsQueueDTO = {
+  name: string;
+  size: number;
+  workers: number;
+  waitingAck: number;
+};
+
+export type MetricsDTO = {
+  queues: MetricsQueueDTO[];
+};
