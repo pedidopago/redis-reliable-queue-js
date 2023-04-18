@@ -12,7 +12,7 @@ import {
 
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
-  #ackSuffix: string;
+  #ackSuffix = "-ack";
   #listExpirationSeconds: number;
   #messageTimeoutSeconds: number;
   #emptyQueueTimeoutSeconds: number;
@@ -47,7 +47,6 @@ export class ReliableQueue {
 
   constructor(private readonly config: CreateReliableQueueDTO) {
     this.#redisCli = this.createRedisClient();
-    this.#ackSuffix = config.ackSuffix || "-ack";
     this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
     this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
     this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
@@ -124,6 +123,8 @@ export class ReliableQueue {
     if (this.#listeners.includes(params.queueName)) {
       throw new Error(`Already listening ${params.queueName}`);
     }
+
+    this.#listeners.push(params.queueName);
 
     new Promise(async () => {
       let message: string | undefined;

@@ -4,18 +4,9 @@ package rq
 
 import (
 	"context"
-	_ "embed"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-redis/redis/v8"
-)
-
-var (
-	//go:embed queue.lua
-	luaScript string
 )
 
 type Queue struct {
@@ -56,14 +47,4 @@ func (q Queue) RestoreExpiredMessages(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func 	(err error) bool {
-	if err == nil {
-		return false
-	}
-	if err.Error() == "redis: nil" {
-		return true
-	}
-	return false
 }
