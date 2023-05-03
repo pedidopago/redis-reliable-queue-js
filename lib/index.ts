@@ -100,7 +100,7 @@ export class ReliableQueue {
       );
 
       if (!queueWorker) {
-        throw new Error(`Queue ${queue} not found`);
+        continue;
       }
 
       const workers = queueWorker.toJSON().workers;
