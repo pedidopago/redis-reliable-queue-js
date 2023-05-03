@@ -23,8 +23,8 @@ export type ListenParamsDTO<MessageType> = {
   queueName: string;
   workers: number;
   job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
-  transform: (message: string) => Promise<MessageType>;
   errorHandler: (error: Error, message: string) => Promise<void>;
+  transform?: (message: string) => Promise<MessageType>;
   validate?: (message: MessageType) => Promise<boolean>;
   queueEmptyHandler?: () => Promise<void>;
 };

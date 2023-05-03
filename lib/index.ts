@@ -143,7 +143,9 @@ export class ReliableQueue {
           message = value[0];
           ack = value[1];
 
-          const transformedMessage = await params.transform(message);
+          const transformedMessage = params.transform
+            ? await params.transform(message)
+            : JSON.parse(message);
 
           const validated = params.validate
             ? await params.validate(transformedMessage)
