@@ -3,6 +3,12 @@ type ReliableQueueWorkerParamsDTO = {
   mutexKey?: string;
 };
 
+export type ReliableQueueWorkerData = {
+  id: string;
+  isRunning: boolean;
+  jobsLength: number;
+};
+
 class ReliableQueueWorker {
   #id: string;
   #jobs: Function[] = [];
@@ -50,6 +56,14 @@ class ReliableQueueWorker {
   addJob(job: Function) {
     this.#jobs.push(job);
   }
+
+  toJSON(): ReliableQueueWorkerData {
+    return {
+      id: this.#id,
+      isRunning: this.#isRunning,
+      jobsLength: this.#jobs.length,
+    };
+  }
 }
 
 type ReliableQueueClusterParamsDTO = {
@@ -66,6 +80,10 @@ type AddJobParamsDTO = {
   mutexKey?: string;
 };
 
+type ReliableQueueClusterData = {
+  clusterId: string;
+  workers: ReliableQueueWorkerData[];
+};
 export class ReliableQueueCluster {
   #clusterId: string;
   #workers: ReliableQueueWorker[] = [];
@@ -117,5 +135,12 @@ export class ReliableQueueCluster {
 
   get clusterId() {
     return this.#clusterId;
+  }
+
+  toJSON(): ReliableQueueClusterData {
+    return {
+      clusterId: this.#clusterId,
+      workers: this.#workers.map((worker) => worker.toJSON()),
+    };
   }
 }

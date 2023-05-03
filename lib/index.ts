@@ -95,12 +95,20 @@ export class ReliableQueue {
       const size = await cli.lLen(queue);
       const ackList = queue + this.#ackSuffix;
       const waitingAck = await cli.lLen(ackList);
+      const queueWorker = this.#workers.find(
+        (worker) => worker.clusterId === queue
+      );
+
+      if (!queueWorker) {
+        throw new Error(`Queue ${queue} not found`);
+      }
+
+      const workers = queueWorker.toJSON().workers;
 
       metrics.queues.push({
         name: queue,
         size,
-        workers: this.#workers.filter((worker) => worker.clusterId === queue)
-          .length,
+        workers,
         waitingAck,
       });
     }

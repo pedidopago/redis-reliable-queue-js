@@ -1,3 +1,5 @@
+import { ReliableQueueWorkerData } from "./worker";
+
 export type CreateReliableQueueDTO = {
   url: string;
   password?: string;
@@ -32,7 +34,7 @@ export type ListenParamsDTO<MessageType> = {
 export type MetricsQueueDTO = {
   name: string;
   size: number;
-  workers: number;
+  workers: ReliableQueueWorkerData[];
   waitingAck: number;
 };
 
