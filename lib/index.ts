@@ -58,8 +58,9 @@ export class ReliableQueue {
     const cli = await this.redisCli();
     const ackList = queueName + this.#ackSuffix;
     const popCommand = this.config.lifo ? "rpop" : "lpop";
-    const expireTime =
-      new Date().getTime() / 1000 + this.#messageTimeoutSeconds;
+    const expireTime = new Date(
+      new Date().getTime() / 1000 + this.#messageTimeoutSeconds
+    ).getTime();
 
     const result = await cli.eval(luaScript, {
       keys: [
@@ -76,7 +77,7 @@ export class ReliableQueue {
       return [
         String(result),
         async () => {
-          const arkMessage = expireTime + "|" + String(result);
+          const arkMessage = expireTime.toString() + "|" + String(result);
           await cli.lRem(ackList, 1, arkMessage);
         },
       ];
