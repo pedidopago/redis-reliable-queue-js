@@ -136,10 +136,9 @@ export class ReliableQueue {
     this.#listeners.push(params.queueName);
 
     new Promise(async () => {
-      let message: string | undefined;
-      let ack: Function | undefined;
-
       while (true) {
+        let message: string | undefined = undefined;
+        let ack: Function | undefined = undefined;
         try {
           const value = await this.popMessage(params.queueName);
 
