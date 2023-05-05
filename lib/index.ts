@@ -215,7 +215,6 @@ export class ReliableQueue {
             await ack();
           }
         }
-        await setTimeout(0);
       }
     });
   }

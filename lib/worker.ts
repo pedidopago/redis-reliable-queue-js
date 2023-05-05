@@ -1,3 +1,5 @@
+import { setTimeout } from "timers/promises";
+
 type ReliableQueueWorkerParamsDTO = {
   id: string;
   mutexKey?: string;
@@ -27,17 +29,22 @@ class ReliableQueueWorker {
   }
 
   run() {
-    new Promise(async (resolve) => {
-      this.#isRunning = true;
-      while (true) {
-        const job = this.getJob();
-        if (!job) break;
-        await job();
-      }
+    new Promise(async (resolve, reject) => {
+      try {
+        this.#isRunning = true;
+        while (true) {
+          const job = this.getJob();
+          if (!job) break;
+          await job();
+          await setTimeout(0);
+        }
 
-      this.#isRunning = false;
-      this.#mutexKey = undefined;
-      resolve(void 0);
+        this.#isRunning = false;
+        this.#mutexKey = undefined;
+        resolve(void 0);
+      } catch (e) {
+        reject(e);
+      }
     });
   }
 
@@ -115,9 +122,7 @@ export class ReliableQueueCluster {
         return availableWorker;
       }
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.#findAvailableWorkerDebounce)
-      );
+      await setTimeout(this.#findAvailableWorkerDebounce);
     }
   }
 
