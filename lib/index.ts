@@ -100,11 +100,7 @@ export class ReliableQueue {
         (worker) => worker.clusterId === queue
       );
 
-      if (!queueWorker) {
-        continue;
-      }
-
-      const workers = queueWorker.toJSON().workers;
+      const workers = queueWorker ? queueWorker.toJSON().workers : [];
 
       metrics.queues.push({
         name: queue,
