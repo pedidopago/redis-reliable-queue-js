@@ -89,6 +89,9 @@ export class ReliableQueue {
     const queues = this.#listeners;
 
     const metrics: MetricsDTO = {
+      redis: {
+        connected: this.#redisCli.isOpen,
+      },
       queues: [],
     };
 

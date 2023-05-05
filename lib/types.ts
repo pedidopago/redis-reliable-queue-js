@@ -39,5 +39,8 @@ export type MetricsQueueDTO = {
 };
 
 export type MetricsDTO = {
+  redis: {
+    connected: boolean;
+  };
   queues: MetricsQueueDTO[];
 };
