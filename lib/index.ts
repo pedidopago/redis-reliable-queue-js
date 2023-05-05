@@ -134,6 +134,22 @@ export class ReliableQueue {
 
     this.#listeners.push(params.queueName);
 
+    let worker: ReliableQueueCluster;
+
+    const workerExists = this.#workers.find(
+      (worker) => worker.clusterId === params.queueName
+    );
+
+    if (workerExists) {
+      worker = workerExists;
+    } else {
+      worker = new ReliableQueueCluster({
+        maxWorkers: params.workers,
+        clusterId: params.queueName,
+      });
+      this.#workers.push(worker);
+    }
+
     new Promise(async () => {
       while (true) {
         let message: string | undefined = undefined;
@@ -187,22 +203,6 @@ export class ReliableQueue {
               await ack();
             }
           };
-
-          let worker;
-
-          const workerExists = this.#workers.find(
-            (worker) => worker.clusterId === params.queueName
-          );
-
-          if (workerExists) {
-            worker = workerExists;
-          } else {
-            worker = new ReliableQueueCluster({
-              maxWorkers: params.workers,
-              clusterId: params.queueName,
-            });
-            this.#workers.push(worker);
-          }
 
           await worker.addJob({
             job,
