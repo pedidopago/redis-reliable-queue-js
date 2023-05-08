@@ -2,6 +2,8 @@ import { createClient, RedisClientType } from "redis";
 import { luaScript } from "./lua-script";
 import { setTimeout } from "timers/promises";
 import { ReliableQueueCluster } from "./worker";
+import { ReliableQueueListener } from "./listener";
+import { logger } from "./logger";
 import {
   CreateReliableQueueDTO,
   ListenParamsDTO,
@@ -9,8 +11,6 @@ import {
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
-import { ReliableQueueListener } from "./listener";
-import { logger } from "./logger";
 
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
@@ -172,7 +172,10 @@ export class ReliableQueue {
     logger(`Listener added to HashMap for ${params.queueName}`);
 
     logger(`Listening ${params.queueName}`);
-    listener.listen();
+    new Promise(async () => {
+      listener.listen();
+      await setTimeout(0);
+    });
   }
 
   async close() {
