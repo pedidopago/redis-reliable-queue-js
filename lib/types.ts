@@ -7,6 +7,7 @@ export type CreateReliableQueueDTO = {
   listExpirationSeconds?: number;
   messageTimeoutSeconds?: number;
   emptyQueueTimeoutSeconds?: number;
+  queueListenDebounceMilliseconds?: number;
 };
 
 export type PushMessageParamsDTO = {
@@ -14,7 +15,11 @@ export type PushMessageParamsDTO = {
   message: string;
 };
 
-export type PopMessageResponseDTO = [string, Function];
+export type PopMessageResponseDTO = {
+  message: string;
+  ack: () => Promise<void>;
+  isEmpty: boolean;
+};
 
 type ListenJobParamsDTO<MessageType> = {
   message: MessageType;

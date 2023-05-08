@@ -3,6 +3,10 @@ import { setTimeout as setTimeoutAsync } from "timers/promises";
 
 jest.setTimeout(90000);
 
+const log = (...message: any[]) => {
+  console.log(message);
+};
+
 describe("ReliableQueue", () => {
   let rq: ReliableQueue;
 
@@ -62,7 +66,11 @@ describe("ReliableQueue", () => {
         queueName: "test",
         workers: 5,
         errorHandler(error, message) {
-          console.log(error, message);
+          log(error, message);
+          return Promise.resolve();
+        },
+        queueEmptyHandler: async () => {
+          log("Queue empty");
           return Promise.resolve();
         },
         transform: async (message) => JSON.parse(message),
@@ -71,8 +79,8 @@ describe("ReliableQueue", () => {
 
           if (params.message.mutexTest === "a") {
             await setTimeoutAsync(5000);
-            console.log("Sou a");
-            console.log({ message: params.message }, new Date().toISOString());
+            log("Sou a");
+            log({ message: params.message }, new Date().toISOString());
             return;
           }
 
@@ -81,18 +89,18 @@ describe("ReliableQueue", () => {
           }
 
           await setTimeoutAsync(1000);
-          console.log({ message: params.message }, new Date().toISOString());
+          log({ message: params.message }, new Date().toISOString());
         },
         mutexPath: "mutexTest",
       });
 
       await setTimeoutAsync(20000);
 
-      console.log("Adding more messages");
+      log("Adding more messages");
       await addMutex("b");
     });
 
-    console.log("Done");
+    log("Done");
 
     expect(true).toBe(true);
   });

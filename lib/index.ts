@@ -9,15 +9,19 @@ import {
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
+import { ReliableQueueListener } from "./listener";
 
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
   #ackSuffix = "-ack";
   #listExpirationSeconds: number;
   #messageTimeoutSeconds: number;
+  #queueListenDebounceMilliseconds: number;
   #emptyQueueTimeoutSeconds: number;
-  #listeners: string[] = [];
-  #workers: ReliableQueueCluster[] = [];
+  #listeners: Map<string, ReliableQueueListener<any>> = new Map<
+    string,
+    ReliableQueueListener<any>
+  >();
 
   private async redisCli(): Promise<RedisClientType<any, any, any>> {
     try {
@@ -50,37 +54,51 @@ export class ReliableQueue {
     this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
     this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
     this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
+    this.#queueListenDebounceMilliseconds =
+      config.queueListenDebounceMilliseconds || 100;
   }
 
-  private async popMessage(
+  private async *popMessage(
     queueName: string
-  ): Promise<PopMessageResponseDTO | undefined> {
-    const cli = await this.redisCli();
-    const ackList = queueName + this.#ackSuffix;
-    const popCommand = this.config.lifo ? "rpop" : "lpop";
-    const expireTime = new Date(
-      new Date().getTime() / 1000 + this.#messageTimeoutSeconds
-    ).getTime();
+  ): AsyncGenerator<PopMessageResponseDTO> {
+    while (true) {
+      const cli = await this.redisCli();
+      const ackList = queueName + this.#ackSuffix;
+      const popCommand = this.config.lifo ? "rpop" : "lpop";
+      const expireTime = new Date(
+        new Date().getTime() / 1000 + this.#messageTimeoutSeconds
+      ).getTime();
 
-    const result = await cli.eval(luaScript, {
-      keys: [
-        queueName,
-        ackList,
-        expireTime.toString(),
-        this.#listExpirationSeconds.toString(),
-        popCommand,
-        "rpush",
-      ],
-    });
+      const result = await cli.eval(luaScript, {
+        keys: [
+          queueName,
+          ackList,
+          expireTime.toString(),
+          this.#listExpirationSeconds.toString(),
+          popCommand,
+          "rpush",
+        ],
+      });
 
-    if (result) {
-      return [
-        String(result),
-        async () => {
-          const arkMessage = expireTime.toString() + "|" + String(result);
-          await cli.lRem(ackList, 1, arkMessage);
-        },
-      ];
+      if (result) {
+        yield {
+          message: String(result),
+          ack: async () => {
+            const arkMessage = expireTime.toString() + "|" + String(result);
+            await cli.lRem(ackList, 1, arkMessage);
+          },
+          isEmpty: false,
+        };
+        await setTimeout(this.#queueListenDebounceMilliseconds);
+        continue;
+      }
+
+      yield {
+        isEmpty: true,
+        message: "",
+        ack: async () => {},
+      };
+      await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
     }
   }
 
@@ -95,18 +113,14 @@ export class ReliableQueue {
       queues: [],
     };
 
-    for (const queue of queues) {
-      const size = await cli.lLen(queue);
-      const ackList = queue + this.#ackSuffix;
+    for (const [queueName, listener] of queues) {
+      const size = await cli.lLen(queueName);
+      const ackList = queueName + this.#ackSuffix;
       const waitingAck = await cli.lLen(ackList);
-      const queueWorker = this.#workers.find(
-        (worker) => worker.clusterId === queue
-      );
-
-      const workers = queueWorker ? queueWorker.toJSON().workers : [];
+      const workers = listener.cluster.toJSON().workers;
 
       metrics.queues.push({
-        name: queue,
+        name: queueName,
         size,
         workers,
         waitingAck,
@@ -128,128 +142,24 @@ export class ReliableQueue {
   }
 
   listen<MessageType>(params: ListenParamsDTO<MessageType>): void {
-    if (this.#listeners.includes(params.queueName)) {
+    if (this.#listeners.has(params.queueName)) {
       throw new Error(`Already listening ${params.queueName}`);
     }
 
-    this.#listeners.push(params.queueName);
-
-    let worker: ReliableQueueCluster;
-
-    const workerExists = this.#workers.find(
-      (worker) => worker.clusterId === params.queueName
-    );
-
-    if (workerExists) {
-      worker = workerExists;
-    } else {
-      worker = new ReliableQueueCluster({
-        maxWorkers: params.workers,
-        clusterId: params.queueName,
-      });
-      this.#workers.push(worker);
-    }
-
-    new Promise(async () => {
-      while (true) {
-        let message: string | undefined = undefined;
-        let ack: Function | undefined = undefined;
-        try {
-          const value = await this.popMessage(params.queueName);
-
-          if (!value) {
-            if (params.queueEmptyHandler) await params.queueEmptyHandler();
-            await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
-            continue;
-          }
-
-          message = value[0];
-          ack = value[1];
-
-          const transformedMessage = params.transform
-            ? await params.transform(message)
-            : JSON.parse(message);
-
-          const validated = params.validate
-            ? await params.validate(transformedMessage)
-            : true;
-
-          if (!validated) {
-            await params.errorHandler(
-              new Error("Message validation failed"),
-              message
-            );
-            await ack();
-            continue;
-          }
-
-          const mutexKey = this.getListenMutex(
-            transformedMessage,
-            params.mutexPath
-          );
-
-          const job = async () => {
-            try {
-              await params.job({
-                message: transformedMessage,
-              });
-              // @ts-ignore
-              await ack();
-            } catch (e) {
-              const error = e as Error;
-              // @ts-ignore
-              await params.errorHandler(error, message);
-              // @ts-ignore
-              await ack();
-            }
-          };
-
-          await worker.addJob({
-            job,
-            mutexKey,
-          });
-        } catch (e) {
-          const error = e as Error;
-          if (message && ack) {
-            await params.errorHandler(error, message);
-            await ack();
-          }
-        }
-      }
+    const cluster = new ReliableQueueCluster({
+      clusterId: params.queueName,
+      maxWorkers: params.workers,
     });
-  }
 
-  private getListenMutex<MessageType>(
-    message: MessageType,
-    mutexPath?: string
-  ): string | undefined {
-    if (mutexPath) {
-      if (typeof message !== "object" || Array.isArray(message) || !message) {
-        throw new Error("Mutex path is only available for object messages");
-      }
+    const listener = new ReliableQueueListener<MessageType>({
+      cluster,
+      config: params,
+      messagePopper: this.popMessage(params.queueName),
+    });
 
-      const path = mutexPath.split(".");
+    this.#listeners.set(params.queueName, listener);
 
-      let mutex = message;
-
-      for (const key of path) {
-        //@ts-ignore
-        if (mutex[key]) {
-          //@ts-ignore
-          mutex = mutex[key];
-        } else {
-          return undefined;
-        }
-      }
-
-      if (typeof mutex !== "string") {
-        throw new Error("Mutex path must be a string");
-      }
-
-      return mutex;
-    }
-
-    return undefined;
+    listener.listen();
   }
 
   async close() {

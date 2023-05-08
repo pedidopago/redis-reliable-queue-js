@@ -43,6 +43,8 @@ class ReliableQueueWorker {
         this.#mutexKey = undefined;
         resolve(void 0);
       } catch (e) {
+        this.#isRunning = false;
+        this.#mutexKey = undefined;
         reject(e);
       }
     });
