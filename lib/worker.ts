@@ -1,4 +1,5 @@
 import { setTimeout } from "timers/promises";
+import { logger } from "./logger";
 
 type ReliableQueueWorkerParamsDTO = {
   id: string;
@@ -35,6 +36,10 @@ class ReliableQueueWorker {
         while (true) {
           const job = this.getJob();
           if (!job) break;
+          logger("Running job", {
+            workerId: this.#id,
+            mutexKey: this.#mutexKey,
+          });
           await job();
           await setTimeout(0);
         }
@@ -129,6 +134,11 @@ export class ReliableQueueCluster {
   }
 
   async addJob(params: AddJobParamsDTO) {
+    logger("Adding job to cluster", {
+      clusterId: this.#clusterId,
+      mutexKey: params.mutexKey,
+    });
+
     const worker = await this.findAvailableWorker({
       mutexKey: params.mutexKey,
     });

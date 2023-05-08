@@ -10,6 +10,7 @@ import {
   PushMessageParamsDTO,
 } from "./types";
 import { ReliableQueueListener } from "./listener";
+import { logger } from "./logger";
 
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
@@ -98,6 +99,7 @@ export class ReliableQueue {
         message: "",
         ack: async () => {},
       };
+
       await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
     }
   }
@@ -146,10 +148,15 @@ export class ReliableQueue {
       throw new Error(`Already listening ${params.queueName}`);
     }
 
+    logger(`Listening ${params.queueName}`);
+
     const cluster = new ReliableQueueCluster({
       clusterId: params.queueName,
       maxWorkers: params.workers,
     });
+
+    logger(`Starting ${params.workers} workers for ${params.queueName}`);
+    logger(`Starting listener for ${params.queueName}`);
 
     const listener = new ReliableQueueListener<MessageType>({
       cluster,
@@ -157,8 +164,14 @@ export class ReliableQueue {
       messagePopper: this.popMessage(params.queueName),
     });
 
-    this.#listeners.set(params.queueName, listener);
+    logger(`Listener started for ${params.queueName}`);
+    logger(`Workers started for ${params.queueName}`);
 
+    logger(`Adding listener to HashMap for ${params.queueName}`);
+    this.#listeners.set(params.queueName, listener);
+    logger(`Listener added to HashMap for ${params.queueName}`);
+
+    logger(`Listening ${params.queueName}`);
     listener.listen();
   }
 
