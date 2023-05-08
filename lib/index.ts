@@ -172,10 +172,8 @@ export class ReliableQueue {
     logger(`Listener added to HashMap for ${params.queueName}`);
 
     logger(`Listening ${params.queueName}`);
-    new Promise(async () => {
-      listener.listen();
-      await setTimeout(0);
-    });
+
+    listener.listen();
   }
 
   async close() {
