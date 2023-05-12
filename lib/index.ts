@@ -18,7 +18,6 @@ export class ReliableQueue {
   #listExpirationSeconds: number;
   #messageTimeoutSeconds: number;
   #queueListenDebounceMilliseconds: number;
-  #emptyQueueTimeoutSeconds: number;
   #listeners: Map<string, ReliableQueueListener<any>> = new Map<
     string,
     ReliableQueueListener<any>
@@ -27,18 +26,26 @@ export class ReliableQueue {
   private async redisCli(): Promise<RedisClientType<any, any, any>> {
     try {
       if (this.#redisCli.isOpen) {
+        logger("Redis is already connected");
         return this.#redisCli;
       }
 
+      logger("Connecting to Redis");
       await this.#redisCli.connect();
 
       if (!this.#redisCli.isOpen) {
         throw new Error("Could not connect to Redis");
       }
 
+      logger("Connected to Redis");
       return this.#redisCli;
     } catch (e) {
+      logger("Could not connect to Redis");
+      logger(e);
+      logger("Creating new Redis client");
       this.#redisCli = this.createRedisClient();
+      logger("Created new Redis client");
+      logger("Retrying to connect to Redis");
       return this.redisCli();
     }
   }
@@ -54,7 +61,6 @@ export class ReliableQueue {
     this.#redisCli = this.createRedisClient();
     this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
     this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
-    this.#emptyQueueTimeoutSeconds = config.emptyQueueTimeoutSeconds || 60;
     this.#queueListenDebounceMilliseconds =
       config.queueListenDebounceMilliseconds || 100;
   }
@@ -99,8 +105,6 @@ export class ReliableQueue {
         message: "",
         ack: async () => {},
       };
-
-      await setTimeout(this.#emptyQueueTimeoutSeconds * 1000);
     }
   }
 

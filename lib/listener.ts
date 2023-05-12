@@ -1,6 +1,7 @@
 import { logger } from "./logger";
 import { ListenParamsDTO, PopMessageResponseDTO } from "./types";
 import { ReliableQueueCluster } from "./worker";
+import { setTimeout } from "timers/promises";
 
 type ReliableQueueListenerParamsDTO<MessageType> = {
   config: ListenParamsDTO<MessageType>;
@@ -31,6 +32,7 @@ export class ReliableQueueListener<MessageType> {
           });
           if (this.params.config.queueEmptyHandler)
             await this.params.config.queueEmptyHandler();
+          await setTimeout(this.params.config.emptyQueueTimeoutMilliseconds);
           continue;
         }
 

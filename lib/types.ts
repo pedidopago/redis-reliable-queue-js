@@ -29,6 +29,7 @@ export type ListenParamsDTO<MessageType> = {
   mutexPath?: string;
   queueName: string;
   workers: number;
+  emptyQueueTimeoutMilliseconds: number;
   job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
   errorHandler: (error: Error, message: string) => Promise<void>;
   transform?: (message: string) => Promise<MessageType>;
