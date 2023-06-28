@@ -56,7 +56,7 @@ export class ReliableQueue {
     const { queueName, message } = params;
     const cli = await this.redisCli();
 
-    if (this.config.lifo) {
+    if (this.config.leftPush) {
       await cli.lPush(queueName, message);
     } else {
       await cli.rPush(queueName, message);
@@ -68,7 +68,7 @@ export class ReliableQueue {
   ): Promise<PopMessageResponseDTO | undefined> {
     const cli = await this.redisCli();
     const ackList = queueName + this.#ackSuffix;
-    const popCommand = this.config.lifo ? "rpop" : "lpop";
+    const popCommand = this.config.leftPush ? "rpop" : "lpop";
     const expireTime =
       new Date().getTime() / 1000 + this.#messageTimeoutSeconds;
 

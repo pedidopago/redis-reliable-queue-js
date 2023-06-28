@@ -1,7 +1,7 @@
 export type CreateReliableQueueDTO = {
   url: string;
+  leftPush: boolean;
   password?: string;
-  lifo?: boolean;
   ackSuffix?: string;
   listExpirationSeconds?: number;
   messageTimeoutSeconds?: number;
