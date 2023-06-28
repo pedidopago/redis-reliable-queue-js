@@ -2,8 +2,8 @@ import { ReliableQueueWorkerData } from "./worker";
 
 export type CreateReliableQueueDTO = {
   url: string;
+  leftPush: boolean;
   password?: string;
-  leftPush?: boolean;
   listExpirationSeconds?: number;
   messageTimeoutSeconds?: number;
   emptyQueueTimeoutSeconds?: number;

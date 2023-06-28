@@ -1,6 +1,6 @@
 {
   "name": "@pedidopago/redis-reliable-queue",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "Reliable queue pattern using Redis as a backend",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
