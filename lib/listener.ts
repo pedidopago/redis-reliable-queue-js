@@ -103,7 +103,8 @@ export class ReliableQueueListener<MessageType> {
   ): string | undefined {
     if (mutexPath) {
       if (typeof message !== "object" || Array.isArray(message) || !message) {
-        throw new Error("Mutex path is only available for object messages");
+        console.error("Mutex path is only supported for objects");
+        return undefined;
       }
 
       const path = mutexPath.split(".");
@@ -120,11 +121,7 @@ export class ReliableQueueListener<MessageType> {
         }
       }
 
-      if (typeof mutex !== "string") {
-        throw new Error("Mutex path must be a string");
-      }
-
-      return mutex;
+      return String(mutex);
     }
 
     return undefined;
