@@ -65,28 +65,81 @@ export class ReliableQueue {
       config.queueListenDebounceMilliseconds || 100;
   }
 
+  private async getMessageByPrimaryQueue(params: {
+    queueName: string;
+    expireTime: string;
+    ackList: string;
+  }) {
+    const { queueName, expireTime, ackList } = params;
+    const cli = await this.redisCli();
+    const popCommand = this.config.leftPush ? "rpop" : "lpop";
+
+    return cli.eval(luaScript, {
+      keys: [
+        queueName,
+        ackList,
+        expireTime.toString(),
+        this.#listExpirationSeconds.toString(),
+        popCommand,
+        "rpush",
+      ],
+    });
+  }
+
+  private async getMessageByAckQueue(queueName: string) {
+    const cli = await this.redisCli();
+    const ackList = queueName + this.#ackSuffix;
+
+    while (true) {
+      const item = await cli.lPop(ackList);
+
+      if (!item) break;
+
+      const expireTime = Number(item.split("|")[0]);
+
+      if (expireTime < new Date().getTime()) {
+        //Push message back to queue
+
+        const message = item.split("|")[1];
+
+        const pushCommand = this.config.leftPush ? "rPush" : "lPush";
+
+        await cli[pushCommand](queueName, message);
+        await cli.lRem(ackList, 1, item);
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  private async getMessage(params: {
+    queueName: string;
+    expireTime: string;
+    ackList: string;
+  }) {
+    const { queueName } = params;
+
+    await this.getMessageByAckQueue(queueName);
+    return this.getMessageByPrimaryQueue(params);
+  }
+
   private async *popMessage(
     queueName: string
   ): AsyncGenerator<PopMessageResponseDTO> {
+    const cli = await this.redisCli();
+    const expireTime = new Date(
+      new Date().getTime() / 1000 + this.#messageTimeoutSeconds
+    ).getTime();
+    const ackList = queueName + this.#ackSuffix;
+
+    const result = await this.getMessage({
+      queueName,
+      expireTime: expireTime.toString(),
+      ackList,
+    });
+
     while (true) {
-      const cli = await this.redisCli();
-      const ackList = queueName + this.#ackSuffix;
-      const popCommand = this.config.leftPush ? "rpop" : "lpop";
-      const expireTime = new Date(
-        new Date().getTime() / 1000 + this.#messageTimeoutSeconds
-      ).getTime();
-
-      const result = await cli.eval(luaScript, {
-        keys: [
-          queueName,
-          ackList,
-          expireTime.toString(),
-          this.#listExpirationSeconds.toString(),
-          popCommand,
-          "rpush",
-        ],
-      });
-
       if (result) {
         yield {
           message: String(result),
