@@ -141,12 +141,11 @@ export class ReliableQueue {
               await params.job({
                 message: transformedMessage,
               });
-              // @ts-ignore
-              await ack();
             } catch (e) {
               const error = e as Error;
               // @ts-ignore
               await params.errorHandler(error, message);
+            } finally {
               // @ts-ignore
               await ack();
             }
