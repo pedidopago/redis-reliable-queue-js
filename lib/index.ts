@@ -15,13 +15,11 @@ import {
 export class ReliableQueue {
   #redisCli: RedisClientType<any, any, any>;
   #ackSuffix = "-ack";
-  #listExpirationSeconds: number;
-  #messageTimeoutSeconds: number;
-  #queueListenDebounceMilliseconds: number;
   #listeners: Map<string, ReliableQueueListener<any>> = new Map<
     string,
     ReliableQueueListener<any>
   >();
+  #listExpirationInMinutes: number;
 
   private async redisCli(): Promise<RedisClientType<any, any, any>> {
     try {
@@ -59,45 +57,45 @@ export class ReliableQueue {
 
   constructor(private readonly config: CreateReliableQueueDTO) {
     this.#redisCli = this.createRedisClient();
-    this.#listExpirationSeconds = config.listExpirationSeconds || 3600;
-    this.#messageTimeoutSeconds = config.messageTimeoutSeconds || 60 * 20;
-    this.#queueListenDebounceMilliseconds =
-      config.queueListenDebounceMilliseconds || 100;
+    this.#listExpirationInMinutes = Number(
+      (config.listExpirationInMinutes * 60).toFixed()
+    );
   }
 
-  private async getMessageByPrimaryQueue(params: {
-    queueName: string;
-    expireTime: string;
-    ackList: string;
-  }) {
-    const { queueName, expireTime, ackList } = params;
+  private async getMessageByPrimaryQueue(params: ListenParamsDTO<any>) {
+    const { queueName } = params;
     const cli = await this.redisCli();
     const popCommand = this.config.leftPush ? "rpop" : "lpop";
+    const ackList = queueName + this.#ackSuffix;
+    const expireTime = this.getExpireTime(params).toString();
+    const ackListExpireTime = this.#listExpirationInMinutes.toString();
 
     return cli.eval(luaScript, {
       keys: [
         queueName,
         ackList,
-        expireTime.toString(),
-        this.#listExpirationSeconds.toString(),
+        expireTime,
+        ackListExpireTime,
         popCommand,
-        "rpush",
+        "lpush",
       ],
     });
   }
 
-  private async getMessageByAckQueue(queueName: string) {
+  private async moveAckToPrimaryQueue(queueName: string, forced = false) {
     const cli = await this.redisCli();
     const ackList = queueName + this.#ackSuffix;
 
-    while (true) {
-      const item = await cli.lPop(ackList);
+    const length = await cli.lLen(ackList);
+
+    for (let i = 0; i < length; i++) {
+      const item = await cli.lIndex(ackList, 0);
 
       if (!item) break;
 
       const expireTime = Number(item.split("|")[0]);
 
-      if (expireTime < new Date().getTime()) {
+      if (expireTime < new Date().getTime() && !forced) {
         //Push message back to queue
 
         const message = item.split("|")[1];
@@ -113,33 +111,31 @@ export class ReliableQueue {
     }
   }
 
-  private async getMessage(params: {
-    queueName: string;
-    expireTime: string;
-    ackList: string;
-  }) {
+  private async getMessage(params: ListenParamsDTO<any>) {
     const { queueName } = params;
 
-    await this.getMessageByAckQueue(queueName);
+    await this.moveAckToPrimaryQueue(queueName);
     return this.getMessageByPrimaryQueue(params);
   }
 
+  private getExpireTime(params: ListenParamsDTO<any>) {
+    const nowInMilliseconds = new Date().getTime();
+    const expireTime = nowInMilliseconds + params.messageTimeoutMilliseconds;
+    return Number(expireTime.toFixed());
+  }
+
   private async *popMessage(
-    queueName: string
+    params: ListenParamsDTO<any>
   ): AsyncGenerator<PopMessageResponseDTO> {
     const cli = await this.redisCli();
-    const expireTime = new Date(
-      new Date().getTime() / 1000 + this.#messageTimeoutSeconds
-    ).getTime();
-    const ackList = queueName + this.#ackSuffix;
-
-    const result = await this.getMessage({
-      queueName,
-      expireTime: expireTime.toString(),
-      ackList,
-    });
+    const expireTime = this.getExpireTime(params);
+    const queueListenDebounceMilliseconds =
+      params.queueListenDebounceMilliseconds || 10;
+    const ackList = params.queueName + this.#ackSuffix;
 
     while (true) {
+      const result = await this.getMessage(params);
+
       if (result) {
         yield {
           message: String(result),
@@ -149,7 +145,7 @@ export class ReliableQueue {
           },
           isEmpty: false,
         };
-        await setTimeout(this.#queueListenDebounceMilliseconds);
+        await setTimeout(queueListenDebounceMilliseconds);
         continue;
       }
 
@@ -218,7 +214,11 @@ export class ReliableQueue {
     const listener = new ReliableQueueListener<MessageType>({
       cluster,
       config: params,
-      messagePopper: this.popMessage(params.queueName),
+      messagePopper: this.popMessage(params),
+      onInit: async () => {
+        logger(`Listener initialized for ${params.queueName}`);
+        await this.moveAckToPrimaryQueue(params.queueName, true);
+      },
     });
 
     logger(`Listener started for ${params.queueName}`);

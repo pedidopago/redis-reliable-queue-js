@@ -4,10 +4,7 @@ export type CreateReliableQueueDTO = {
   url: string;
   leftPush: boolean;
   password?: string;
-  listExpirationSeconds?: number;
-  messageTimeoutSeconds?: number;
-  emptyQueueTimeoutSeconds?: number;
-  queueListenDebounceMilliseconds?: number;
+  listExpirationInMinutes: number;
 };
 
 export type PushMessageParamsDTO = {
@@ -30,6 +27,8 @@ export type ListenParamsDTO<MessageType> = {
   queueName: string;
   workers: number;
   emptyQueueTimeoutMilliseconds: number;
+  queueListenDebounceMilliseconds?: number;
+  messageTimeoutMilliseconds: number;
   job: (params: ListenJobParamsDTO<MessageType>) => Promise<void>;
   errorHandler: (error: Error, message: string) => Promise<void>;
   transform?: (message: string) => Promise<MessageType>;

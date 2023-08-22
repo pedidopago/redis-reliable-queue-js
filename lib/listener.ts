@@ -7,6 +7,7 @@ type ReliableQueueListenerParamsDTO<MessageType> = {
   config: ListenParamsDTO<MessageType>;
   cluster: ReliableQueueCluster;
   messagePopper: AsyncGenerator<PopMessageResponseDTO>;
+  onInit: () => Promise<void>;
 };
 
 export class ReliableQueueListener<MessageType> {
@@ -19,6 +20,8 @@ export class ReliableQueueListener<MessageType> {
   }
 
   async listen(): Promise<void> {
+    await this.params.onInit();
+
     for await (const { ack, isEmpty, message } of this.params.messagePopper) {
       logger("Message received from queue", {
         queueName: this.params.config.queueName,
