@@ -62,12 +62,14 @@ export class ReliableQueue {
     );
   }
 
-  private async getMessageByPrimaryQueue(params: ListenParamsDTO<any>) {
+  private async getMessageByPrimaryQueue(
+    params: ListenParamsDTO<any> & { expireTime: string }
+  ) {
     const { queueName } = params;
     const cli = await this.redisCli();
     const popCommand = this.config.leftPush ? "rpop" : "lpop";
     const ackList = queueName + this.#ackSuffix;
-    const expireTime = this.getExpireTime(params).toString();
+    const expireTime = params.expireTime;
     const ackListExpireTime = this.#listExpirationInMinutes.toString();
 
     return cli.eval(luaScript, {
@@ -111,36 +113,39 @@ export class ReliableQueue {
     }
   }
 
-  private async getMessage(params: ListenParamsDTO<any>) {
+  private async getMessage(
+    params: ListenParamsDTO<any> & {
+      expireTime: string;
+    }
+  ) {
     const { queueName } = params;
 
     await this.moveAckToPrimaryQueue(queueName);
     return this.getMessageByPrimaryQueue(params);
   }
 
-  private getExpireTime(params: ListenParamsDTO<any>) {
-    const nowInMilliseconds = new Date().getTime();
-    const expireTime = nowInMilliseconds + params.messageTimeoutMilliseconds;
-    return Number(expireTime.toFixed());
-  }
-
   private async *popMessage(
     params: ListenParamsDTO<any>
   ): AsyncGenerator<PopMessageResponseDTO> {
     const cli = await this.redisCli();
-    const expireTime = this.getExpireTime(params);
+    const nowInMilliseconds = new Date().getTime();
+    const expireTimeMs = nowInMilliseconds + params.messageTimeoutMilliseconds;
+    const expireTime = expireTimeMs.toFixed();
     const queueListenDebounceMilliseconds =
       params.queueListenDebounceMilliseconds || 10;
     const ackList = params.queueName + this.#ackSuffix;
 
     while (true) {
-      const result = await this.getMessage(params);
+      const result = await this.getMessage({
+        ...params,
+        expireTime,
+      });
 
       if (result) {
         yield {
           message: String(result),
           ack: async () => {
-            const arkMessage = expireTime.toString() + "|" + String(result);
+            const arkMessage = expireTime + "|" + String(result);
             await cli.lRem(ackList, 1, arkMessage);
           },
           isEmpty: false,
