@@ -173,16 +173,23 @@ export class ReliableQueue {
       const ackList = queueName + this.#ackSuffix;
       const waitingAck = await cli.lLen(ackList);
       const workers = listener.cluster.toJSON().workers;
+      const runningWorkers = workers.filter((w) => w.isRunning);
 
       metrics.queues.push({
         name: queueName,
         size,
-        workers,
+        workers: runningWorkers,
+        workersRunning: runningWorkers.length,
+        workersLength: workers.length,
         waitingAck,
       });
     }
 
     return metrics;
+  }
+
+  async getRedisCLI() {
+    return this.redisCli();
   }
 
   async pushMessage(params: PushMessageParamsDTO) {

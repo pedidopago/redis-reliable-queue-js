@@ -40,6 +40,8 @@ export type MetricsQueueDTO = {
   name: string;
   size: number;
   workers: ReliableQueueWorkerData[];
+  workersRunning: number;
+  workersLength: number;
   waitingAck: number;
 };
 
