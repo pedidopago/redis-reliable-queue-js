@@ -62,71 +62,32 @@ export class ReliableQueue {
     );
   }
 
-  private async getMessageByPrimaryQueue(
-    params: ListenParamsDTO<any> & { expireTime: string }
-  ) {
-    const { queueName } = params;
-    const cli = await this.redisCli();
-    const popCommand = this.config.leftPush ? "rpop" : "lpop";
-    const ackList = queueName + this.#ackSuffix;
-    const expireTime = params.expireTime;
-    const ackListExpireTime = this.#listExpirationInMinutes.toString();
-
-    return cli.eval(luaScript, {
-      keys: [
-        queueName,
-        ackList,
-        expireTime,
-        ackListExpireTime,
-        popCommand,
-        "lpush",
-      ],
-    });
-  }
-
-  private async moveAckToPrimaryQueue(queueName: string, forced = false) {
+  private async moveAckToPrimaryQueue(queueName: string) {
     const cli = await this.redisCli();
     const ackList = queueName + this.#ackSuffix;
 
     const length = await cli.lLen(ackList);
+    const charToSplit = "|";
 
-    for (let i = 0; i < length; i++) {
-      const item = await cli.lIndex(ackList, 0);
+    for (let i = length - 1; i !== -1; i--) {
+      const item = await cli.lIndex(ackList, i);
 
       if (!item) break;
 
-      const expireTime = Number(item.split("|")[0]);
+      const splitIndex = item.indexOf(charToSplit);
+      const message = item.slice(splitIndex + 1);
+      const pushCommand = this.config.leftPush ? "rPush" : "lPush";
 
-      if (expireTime < new Date().getTime() && !forced) {
-        //Push message back to queue
-
-        const message = item.split("|")[1];
-
-        const pushCommand = this.config.leftPush ? "rPush" : "lPush";
-
-        await cli[pushCommand](queueName, message);
-        await cli.lRem(ackList, 1, item);
-        continue;
-      }
-
-      break;
+      await cli[pushCommand](queueName, message);
+      await cli.lRem(ackList, 1, item);
     }
-  }
-
-  private async getMessage(
-    params: ListenParamsDTO<any> & {
-      expireTime: string;
-    }
-  ) {
-    const { queueName } = params;
-
-    await this.moveAckToPrimaryQueue(queueName);
-    return this.getMessageByPrimaryQueue(params);
   }
 
   private async *popMessage(
     params: ListenParamsDTO<any>
   ): AsyncGenerator<PopMessageResponseDTO> {
+    const { queueName } = params;
+
     const cli = await this.redisCli();
     const nowInMilliseconds = new Date().getTime();
     const expireTimeMs = nowInMilliseconds + params.messageTimeoutMilliseconds;
@@ -136,9 +97,19 @@ export class ReliableQueue {
     const ackList = params.queueName + this.#ackSuffix;
 
     while (true) {
-      const result = await this.getMessage({
-        ...params,
-        expireTime,
+      const popCommand = this.config.leftPush ? "rpop" : "lpop";
+      const ackListExpireTime = this.#listExpirationInMinutes.toString();
+
+      const result = await cli.eval(luaScript, {
+        keys: [
+          queueName,
+          ackList,
+          nowInMilliseconds.toString(),
+          expireTime,
+          ackListExpireTime,
+          popCommand,
+          "1000",
+        ],
       });
 
       if (result) {
@@ -229,7 +200,7 @@ export class ReliableQueue {
       messagePopper: this.popMessage(params),
       onInit: async () => {
         logger(`Listener initialized for ${params.queueName}`);
-        await this.moveAckToPrimaryQueue(params.queueName, true);
+        await this.moveAckToPrimaryQueue(params.queueName);
       },
     });
 
