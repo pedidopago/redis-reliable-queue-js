@@ -240,6 +240,28 @@ export class ReliableQueue {
     listener.listen();
   }
 
+  async getLock(params: { key: string; expireTimeSeconds: number }) {
+    const cli = await this.redisCli();
+
+    while (true) {
+      const getLock = await cli.set(params.key, "1", {
+        EX: params.expireTimeSeconds,
+        NX: true,
+      });
+
+      if (getLock) break;
+
+      await setTimeout(100);
+    }
+
+    return true;
+  }
+
+  async releaseLock(params: { key: string }) {
+    const cli = await this.redisCli();
+    await cli.del(params.key);
+  }
+
   async close() {
     const cli = await this.redisCli();
     await cli.disconnect();
