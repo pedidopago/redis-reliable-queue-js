@@ -56,10 +56,11 @@ export class ReliableQueueListener<MessageType> {
           continue;
         }
 
-        const mutexKey = this.getListenMutex(
-          transformedMessage,
-          this.params.config.mutexPath
-        );
+        let mutexKey: string | undefined;
+
+        if (this.params.config.getMutex) {
+          mutexKey = await this.params.config.getMutex(transformedMessage);
+        }
 
         const job = async () => {
           try {
@@ -98,35 +99,5 @@ export class ReliableQueueListener<MessageType> {
         await ack();
       }
     }
-  }
-
-  private getListenMutex<MessageType>(
-    message: MessageType,
-    mutexPath?: string
-  ): string | undefined {
-    if (mutexPath) {
-      if (typeof message !== "object" || Array.isArray(message) || !message) {
-        console.error("Mutex path is only supported for objects");
-        return undefined;
-      }
-
-      const path = mutexPath.split(".");
-
-      let mutex = message;
-
-      for (const key of path) {
-        //@ts-ignore
-        if (mutex[key]) {
-          //@ts-ignore
-          mutex = mutex[key];
-        } else {
-          return undefined;
-        }
-      }
-
-      return String(mutex);
-    }
-
-    return undefined;
   }
 }

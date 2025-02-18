@@ -23,7 +23,6 @@ type ListenJobParamsDTO<MessageType> = {
 };
 
 export type ListenParamsDTO<MessageType> = {
-  mutexPath?: string;
   queueName: string;
   workers: number;
   emptyQueueTimeoutMilliseconds: number;
@@ -34,6 +33,7 @@ export type ListenParamsDTO<MessageType> = {
   transform?: (message: string) => Promise<MessageType>;
   validate?: (message: MessageType) => Promise<boolean>;
   queueEmptyHandler?: () => Promise<void>;
+  getMutex?: (message: MessageType) => string | Promise<string>;
 };
 
 export type MetricsQueueDTO = {
