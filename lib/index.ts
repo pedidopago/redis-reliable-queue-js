@@ -48,6 +48,10 @@ export class ReliableQueue {
     }
   }
 
+  private connectionInterval = setInterval(async () => {
+    await this.redisCli();
+  }, 5000);
+
   private createRedisClient(): RedisClientType<any, any, any> {
     return createClient({
       url: this.config.url,
