@@ -21,7 +21,7 @@ export class ReliableQueue {
   >();
   #listExpirationInMinutes: number;
 
-  private async redisCli(): Promise<RedisClientType<any, any, any>> {
+  private async redisCliRef(): Promise<RedisClientType<any, any, any>> {
     try {
       if (this.#redisCli.isOpen) {
         logger("Redis is already connected");
@@ -44,13 +44,9 @@ export class ReliableQueue {
       this.#redisCli = this.createRedisClient();
       logger("Created new Redis client");
       logger("Retrying to connect to Redis");
-      return this.redisCli();
+      return this.redisCliRef();
     }
   }
-
-  private connectionInterval = setInterval(async () => {
-    await this.redisCli();
-  }, 5000);
 
   private createRedisClient(): RedisClientType<any, any, any> {
     return createClient({
@@ -67,14 +63,15 @@ export class ReliableQueue {
   }
 
   private async moveAckToPrimaryQueue(queueName: string) {
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
     const ackList = queueName + this.#ackSuffix;
 
     const length = await cli.lLen(ackList);
     const charToSplit = "|";
 
     for (let i = length - 1; i !== -1; i--) {
-      const item = await cli.lIndex(ackList, i);
+      const cliForItem = await this.redisCliRef();
+      const item = await cliForItem.lIndex(ackList, i);
 
       if (!item) break;
 
@@ -92,7 +89,6 @@ export class ReliableQueue {
   ): AsyncGenerator<PopMessageResponseDTO> {
     const { queueName } = params;
 
-    const cli = await this.redisCli();
     const nowInMilliseconds = new Date().getTime();
     const expireTimeMs = nowInMilliseconds + params.messageTimeoutMilliseconds;
     const expireTime = expireTimeMs.toFixed();
@@ -101,6 +97,7 @@ export class ReliableQueue {
     const ackList = params.queueName + this.#ackSuffix;
 
     while (true) {
+      const cli = await this.redisCliRef();
       const popCommand = this.config.leftPush ? "rpop" : "lpop";
       const ackListExpireTime = this.#listExpirationInMinutes.toString();
 
@@ -138,7 +135,7 @@ export class ReliableQueue {
   }
 
   async metrics(): Promise<MetricsDTO> {
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
     const queues = this.#listeners;
 
     const metrics: MetricsDTO = {
@@ -169,12 +166,12 @@ export class ReliableQueue {
   }
 
   async getRedisCLI() {
-    return this.redisCli();
+    return this.redisCliRef();
   }
 
   async pushMessage(params: PushMessageParamsDTO) {
     const { queueName, message } = params;
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
 
     if (this.config.leftPush) {
       await cli.lPush(queueName, message);
@@ -221,7 +218,7 @@ export class ReliableQueue {
   }
 
   async getLock(params: { key: string; expireTimeSeconds: number }) {
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
 
     while (true) {
       const getLock = await cli.set(params.key, "1", {
@@ -238,12 +235,12 @@ export class ReliableQueue {
   }
 
   async releaseLock(params: { key: string }) {
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
     await cli.del(params.key);
   }
 
   async close() {
-    const cli = await this.redisCli();
+    const cli = await this.redisCliRef();
     await cli.disconnect();
   }
 }
