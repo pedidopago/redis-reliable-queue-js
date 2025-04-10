@@ -11,9 +11,10 @@ import {
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
+import { Socket } from "net";
 
 export class ReliableQueue {
-  #redisCli: RedisClientType<any, any, any>;
+  #redisCli!: RedisClientType<any, any, any>;
   #ackSuffix = "-ack";
   #listeners: Map<string, ReliableQueueListener<any>> = new Map<
     string,
@@ -22,42 +23,52 @@ export class ReliableQueue {
   #listExpirationInMinutes: number;
 
   private async redisCliRef(): Promise<RedisClientType<any, any, any>> {
-    try {
-      if (this.#redisCli.isOpen) {
-        logger("Redis is already connected");
-        return this.#redisCli;
-      }
+    if (this.#redisCli) return this.#redisCli;
 
-      logger("Connecting to Redis");
-      await this.#redisCli.connect();
-
-      if (!this.#redisCli.isOpen) {
-        throw new Error("Could not connect to Redis");
-      }
-
-      logger("Connected to Redis");
-      return this.#redisCli;
-    } catch (e) {
-      logger("Could not connect to Redis");
-      logger(e);
-      logger("Creating new Redis client");
-      this.#redisCli = this.createRedisClient();
-      logger("Created new Redis client");
-      logger("Retrying to connect to Redis");
-      return this.redisCliRef();
-    }
-  }
-
-  private createRedisClient(): RedisClientType<any, any, any> {
-    return createClient({
+    const cli = createClient({
       url: this.config.url,
       password: this.config.password,
-      socket: { reconnectStrategy: 1000 },
+      socket: {
+        connectTimeout: 1000,
+        reconnectStrategy(retries, cause) {
+          logger("Redis reconnecting", { retries, cause });
+          return Math.min(retries * 50, 10000);
+        },
+      },
     });
+
+    cli.on("connect", () => {
+      logger("Redis connecting");
+    });
+
+    cli.on("error", (err) => {
+      logger("Redis error", { err });
+    });
+
+    cli.on("ready", () => {
+      logger("Redis connected");
+    });
+
+    cli.on("end", () => {
+      logger("Redis disconnected");
+    });
+
+    cli.on("reconnecting", () => {
+      logger("Redis reconnecting");
+    });
+
+    cli.on("close", () => {
+      logger("Redis closed");
+    });
+
+    await cli.connect();
+
+    this.#redisCli = cli;
+
+    return cli;
   }
 
   constructor(private readonly config: CreateReliableQueueDTO) {
-    this.#redisCli = this.createRedisClient();
     this.#listExpirationInMinutes = Number(
       (config.listExpirationInMinutes * 60).toFixed()
     );
