@@ -52,6 +52,7 @@ export class ReliableQueue {
     return createClient({
       url: this.config.url,
       password: this.config.password,
+      socket: { reconnectStrategy: 1000 },
     });
   }
 
