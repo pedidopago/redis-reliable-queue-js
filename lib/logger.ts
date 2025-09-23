@@ -1,4 +1,6 @@
+const debug = process.env.RELIABLE_QUEUE_DEBUG;
 export const logger = (...args: any[]) => {
+  if (!debug) return;
   const newArgs = args.map((arg) => {
     if (typeof arg === "object") {
       return JSON.stringify(arg);
@@ -8,8 +10,5 @@ export const logger = (...args: any[]) => {
     }
     return arg;
   });
-
-  if (process.env.RELIABLE_QUEUE_DEBUG) {
-    console.log("[RELIABLE_QUEUE_JS] - ", ...newArgs);
-  }
+  console.log("[RELIABLE_QUEUE_JS] - ", ...newArgs);
 };
