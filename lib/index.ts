@@ -11,7 +11,6 @@ import {
   PopMessageResponseDTO,
   PushMessageParamsDTO,
 } from "./types";
-import { Socket } from "net";
 
 export class ReliableQueue {
   #redisCli!: RedisClientType<any, any, any>;

@@ -101,7 +101,7 @@ type ReliableQueueClusterData = {
 export class ReliableQueueCluster {
   #clusterId: string;
   #workers: ReliableQueueWorker[] = [];
-  #findAvailableWorkerDebounce = 100;
+  #findAvailableWorkerDebounce = 1;
 
   constructor(params: ReliableQueueClusterParamsDTO) {
     this.#clusterId = params.clusterId;
