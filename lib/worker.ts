@@ -1,4 +1,3 @@
-import { setTimeout } from "timers/promises";
 import { logger } from "./logger";
 
 type ReliableQueueWorkerParamsDTO = {
@@ -41,7 +40,7 @@ class ReliableQueueWorker {
             mutexKey: this.#mutexKey,
           });
           await job();
-          await setTimeout(0);
+          await new Promise((r) => setImmediate(r));
         }
 
         this.#isRunning = false;
@@ -129,7 +128,7 @@ export class ReliableQueueCluster {
         return availableWorker;
       }
 
-      await setTimeout(this.#findAvailableWorkerDebounce);
+      await new Promise((r) => setImmediate(r));
     }
   }
 

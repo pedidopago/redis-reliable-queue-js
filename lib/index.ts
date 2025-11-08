@@ -133,7 +133,7 @@ export class ReliableQueue {
           },
           isEmpty: false,
         };
-        await setTimeout(queueListenDebounceMilliseconds);
+        await new Promise((r) => setImmediate(r));
         continue;
       }
 
