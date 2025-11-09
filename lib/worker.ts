@@ -1,8 +1,10 @@
+import { EventEmitter } from "events";
 import { logger } from "./logger";
 
 type ReliableQueueWorkerParamsDTO = {
   id: string;
   mutexKey?: string;
+  eventEmitter: EventEmitter;
 };
 
 export type ReliableQueueWorkerData = {
@@ -16,10 +18,12 @@ class ReliableQueueWorker {
   #jobs: Function[] = [];
   #isRunning = false;
   #mutexKey?: string;
+  #eventEmitter: EventEmitter;
 
   constructor(params: ReliableQueueWorkerParamsDTO) {
     this.#id = params.id;
     this.#mutexKey = params.mutexKey;
+    this.#eventEmitter = params.eventEmitter;
   }
 
   private getJob(): Function | undefined {
@@ -45,10 +49,12 @@ class ReliableQueueWorker {
 
         this.#isRunning = false;
         this.#mutexKey = undefined;
+        this.#eventEmitter.emit("worker-finished", this.#id);
         resolve(void 0);
       } catch (e) {
         this.#isRunning = false;
         this.#mutexKey = undefined;
+        this.#eventEmitter.emit("worker-finished", this.#id);
         reject(e);
       }
     });
@@ -100,13 +106,19 @@ type ReliableQueueClusterData = {
 export class ReliableQueueCluster {
   #clusterId: string;
   #workers: ReliableQueueWorker[] = [];
-  #findAvailableWorkerDebounce = 1;
+  #eventEmitter: EventEmitter;
 
   constructor(params: ReliableQueueClusterParamsDTO) {
     this.#clusterId = params.clusterId;
+    this.#eventEmitter = new EventEmitter();
 
     for (let i = 0; i < params.maxWorkers; i++) {
-      this.#workers.push(new ReliableQueueWorker({ id: i.toString() }));
+      this.#workers.push(
+        new ReliableQueueWorker({
+          id: i.toString(),
+          eventEmitter: this.#eventEmitter,
+        })
+      );
     }
   }
 
@@ -124,11 +136,15 @@ export class ReliableQueueCluster {
 
       const availableWorker = this.#workers.find((worker) => !worker.isRunning);
 
-      if (availableWorker) {
-        return availableWorker;
-      }
+      if (availableWorker) return availableWorker;
 
-      await new Promise((r) => setImmediate(r));
+      await new Promise<void>((resolve) => {
+        const onWorkerFinished = () => {
+          this.#eventEmitter.off("worker-finished", onWorkerFinished);
+          resolve();
+        };
+        this.#eventEmitter.once("worker-finished", onWorkerFinished);
+      });
     }
   }
 
